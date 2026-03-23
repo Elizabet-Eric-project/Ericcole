@@ -264,7 +264,7 @@ export default function ChatAI({ user, t }) {
             color: 'var(--accent)', 
             padding: '2px 6px', 
             borderRadius: '4px',
-            fontFamily: '"Fira Code", monospace',
+            fontVariantNumeric: 'tabular-nums',
             fontSize: '0.9em'
           }}>
             {part.slice(1, -1)}

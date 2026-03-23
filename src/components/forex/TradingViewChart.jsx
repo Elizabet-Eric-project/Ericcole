@@ -91,11 +91,17 @@ const TradingViewChart = memo(({ symbol, interval, t, isDemo }) => {
         hide_volume: false,
         toolbar_bg: '#fffdf8',
         disabled_features: ['header_symbol_search', 'header_compare'],
+        custom_formatters: {
+          priceFormatterFactory: () => ({
+            format: (price) => Number(price).toFixed(3)
+          })
+        },
         overrides: {
           'paneProperties.background': '#fffaf1',
           'paneProperties.vertGridProperties.color': 'rgba(107, 79, 29, 0.07)',
           'paneProperties.horzGridProperties.color': 'rgba(107, 79, 29, 0.07)',
           'scalesProperties.textColor': '#7f735f',
+          'mainSeriesProperties.minTick': '1000,1,false',
           'mainSeriesProperties.candleStyle.upColor': '#2ecc71',
           'mainSeriesProperties.candleStyle.downColor': '#e74c3c',
           'mainSeriesProperties.candleStyle.borderUpColor': '#2ecc71',

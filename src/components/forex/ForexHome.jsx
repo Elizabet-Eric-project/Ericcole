@@ -84,7 +84,7 @@ export default function ForexHome({ t: globalT, onStartAnalysis, user, onOpenAct
 
       <div className="actions-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
         {activeAnalyses.length > 0 && (
-          <button className="forex-cta-btn" style={{ background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%)', color: '#fffaf1', boxShadow: '0 4px 15px rgba(107, 79, 29, 0.3)' }} onClick={handleOpenActive}>
+          <button className="forex-cta-btn" onClick={handleOpenActive}>
             {tSettings.currentAnalysisBtn} ({activeAnalyses.length})
           </button>
         )}

@@ -70,8 +70,19 @@ export default function ForexAnalysisSettings({
   };
 
   const formatPrice = (price) => {
-    if (typeof price === 'number') return price.toFixed(5);
+    if (typeof price === 'number') return price.toFixed(3);
     return safeRender(price);
+  };
+
+  const formatLevelValue = (value) => {
+    if (typeof value === 'number') return value.toFixed(3);
+    if (typeof value === 'string') {
+      const normalized = value.replace(',', '.').trim();
+      const matched = normalized.match(/-?\d+(\.\d+)?/);
+      const parsed = matched ? Number(matched[0]) : Number(normalized);
+      if (Number.isFinite(parsed)) return parsed.toFixed(3);
+    }
+    return safeRender(value);
   };
 
   useEffect(() => {
@@ -359,22 +370,22 @@ export default function ForexAnalysisSettings({
 
     return (
       <div className="profile-wrapper analysis-result-container">
-        <div style={{ textAlign: 'center', marginBottom: '15px' }}>
-          <h2 className="settings-main-title" style={{ fontSize: '1.7rem', margin: '0 0 6px 0', letterSpacing: '1.5px', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+        <div className="analysis-head">
+          <h2 className="settings-main-title analysis-asset-title">
             {assetObj.icon || assetObj.country ? <AssetIcon asset={assetObj} /> : null}
             {safeRender(assetObj.name !== assetObj.apiVal ? assetObj.name : analysisSymbol)}
           </h2>
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', fontFamily: '"Fira Code", monospace' }}>
-            <span style={{ background: 'rgba(139, 107, 44, 0.14)', color: 'var(--accent)', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold' }}>
+          <div className="analysis-meta-row">
+            <span style={{ background: 'rgba(139, 107, 44, 0.14)', color: 'var(--accent)', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: '500' }}>
               {safeRender(analysisInterval)}
             </span>
-            <span style={{ color: 'var(--text-main)', fontSize: '1.1rem', fontWeight: 'bold' }}>
+            <span style={{ color: 'var(--text-main)', fontSize: '1.1rem', fontWeight: '600' }}>
               {formatPrice(currentPrice)}
             </span>
           </div>
-          <div style={{ marginTop: '8px', fontSize: '0.75rem', color: 'var(--text-soft)', textTransform: 'uppercase', letterSpacing: '1px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px' }}>
+          <div className="analysis-strategy-row">
             {t.strategyLabel}: 
-            <span style={{ color: 'var(--accent)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span className="analysis-strategy-value">
               <span style={{ fontSize: '1.1em' }}>{safeRender(selectedStrategy.icon, '⚡')}</span> 
               {safeRender(selectedStrategy.name || analysisData.strategy_name || 'Custom Strategy')}
             </span>
@@ -386,7 +397,7 @@ export default function ForexAnalysisSettings({
             {filteredInds.map(([key, ind]) => (
               <div key={key} className="ind-item">
                 <span className="ind-name">{safeRender(key)}</span>
-                <span className="ind-val">{typeof ind.value === 'number' ? ind.value.toFixed(5) : safeRender(ind.value)}</span>
+                <span className="ind-val">{typeof ind.value === 'number' ? ind.value.toFixed(3) : safeRender(ind.value)}</span>
                 <span className={`ind-sig ${ind.signal === 'BUY' ? 'sig-buy' : ind.signal === 'SELL' ? 'sig-sell' : 'sig-neutral'}`}>{safeRender(ind.signal)}</span>
               </div>
             ))}
@@ -408,11 +419,11 @@ export default function ForexAnalysisSettings({
             <div className="levels-list" style={{ borderTop: '1px dashed rgba(139, 107, 44, 0.3)', marginTop: '10px', paddingTop: '10px' }}>
               <div className="level-row" style={{ borderBottom: 'none', paddingBottom: '0' }}>
                 <span className="level-label">{t.conservativeSl}</span>
-                <span className="level-val">{safeRender(data.key_levels.conservative_sl)}</span>
+                <span className="level-val">{formatLevelValue(data.key_levels.conservative_sl)}</span>
               </div>
               <div className="level-row" style={{ borderBottom: 'none', paddingBottom: '0' }}>
                 <span className="level-label">{t.targetLabel}</span>
-                <span className="level-val">{safeRender(data.key_levels.rr_2_1_target)}</span>
+                <span className="level-val">{formatLevelValue(data.key_levels.rr_2_1_target)}</span>
               </div>
             </div>
           )}
@@ -451,7 +462,7 @@ export default function ForexAnalysisSettings({
             </div>
             <div style={{ textAlign: 'right' }}>
               {!timeStats.expired && <div style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}>{t.timeRemaining}</div>}
-              <div style={{ fontSize: '1.1rem', color: timeStats.expired ? 'var(--danger)' : 'var(--success)', fontWeight: 'bold' }}>
+              <div style={{ fontSize: '1.1rem', color: timeStats.expired ? 'var(--danger)' : 'var(--success)', fontWeight: '600' }}>
                 {timeStats.expired ? t.expired : formatCountdown(timeStats.remaining)}
               </div>
             </div>

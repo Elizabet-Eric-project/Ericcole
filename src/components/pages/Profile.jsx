@@ -185,7 +185,7 @@ export default function Profile({
               <div className="stats-row" style={{ justifyContent: 'center', height: '100%' }}>
                 <div className="stat-box" style={{ alignItems: 'center', gap: '8px' }}>
                   <span className="stat-label" style={{ color: 'var(--accent)', fontSize: '0.85rem' }}>{t.profile.modeLabel.replace(':', '')}</span>
-                  <span className="stat-value" style={{ fontSize: '1.2rem', fontWeight: '700', letterSpacing: '2px' }}>DEMO</span>
+                  <span className="stat-value" style={{ fontSize: '1.1rem', fontWeight: '600', letterSpacing: 'normal' }}>Demo</span>
                 </div>
               </div>
             )}

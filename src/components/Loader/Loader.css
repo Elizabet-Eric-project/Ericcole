@@ -26,10 +26,11 @@
 .loader-title {
   color: var(--accent);
   font-size: 1.4rem;
-  font-weight: 700;
-  letter-spacing: 3px;
+  font-weight: 600;
+  letter-spacing: normal;
   margin: 0 0 10px 0;
-  text-transform: uppercase;
+  text-transform: none;
+  text-align: left;
 }
 
 .loader-phrase-container {
@@ -42,9 +43,9 @@
 
 .loader-phrase {
   color: var(--text-soft);
-  font-size: 0.95rem;
+  font-size: 0.93rem;
   margin: 0;
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .fade-phrase-anim {

@@ -267,10 +267,12 @@ function App() {
         });
       } catch (error) {}
     }
-    
-    if (newMode === 'demo') setCurrentPage('demoHome');
-    else if (newMode === 'binary') setCurrentPage('signals');
-    else setCurrentPage('analysis');
+
+    if (currentPage !== 'profile') {
+      if (newMode === 'demo') setCurrentPage('demoHome');
+      else if (newMode === 'binary') setCurrentPage('signals');
+      else setCurrentPage('analysis');
+    }
   };
 
   const handleUpdateStrategy = async (strategyId) => {
@@ -443,7 +445,7 @@ function App() {
   };
 
   return (
-    <div className="app-container">
+    <div className="app-container" style={{ '--app-main-top': `${mainPaddingTop}px` }}>
       <BackgroundCandles />
 
       <Header
@@ -471,7 +473,6 @@ function App() {
 }
 
 export default App;
-
 
 
 

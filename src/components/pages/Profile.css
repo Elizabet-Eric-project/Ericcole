@@ -33,7 +33,7 @@
   border: 2px solid var(--accent);
   overflow: hidden;
   position: relative;
-  box-shadow: 0 0 10px rgba(212, 175, 55, 0.2);
+  box-shadow: 0 2px 8px rgba(61, 47, 28, 0.06);
   background-color: var(--text-main);
 }
 
@@ -56,7 +56,7 @@
   font-size: 2.5rem;
   color: var(--accent);
   background-color: rgba(212, 175, 55, 0.1);
-  font-weight: bold;
+  font-weight: 600;
   width: 100%;
   height: 100%;
 }
@@ -75,14 +75,14 @@
 .profile-stats-card {
   background: var(--bg-panel);
   border: 1px solid rgba(212, 175, 55, 0.2);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 12px 15px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 10px;
   flex: 1;
-  box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+  box-shadow: 0 2px 8px rgba(61, 47, 28, 0.06);
 }
 
 .stats-row {
@@ -112,7 +112,7 @@
   font-size: 0.7rem;
   color: var(--text-soft);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: normal;
 }
 
 .stat-value {
@@ -123,7 +123,7 @@
 
 .stat-value.gold {
   color: var(--accent);
-  font-family: 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
   font-size: 0.95rem;
 }
 
@@ -164,7 +164,7 @@
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
   border-radius: 25px;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 15px rgba(212, 175, 55, 0.4);
+  box-shadow: 0 2px 8px rgba(212, 175, 55, 0.2);
 }
 
 .mode-slider.right {
@@ -196,12 +196,12 @@
 }
 
 .settings-main-title {
-  text-align: center;
-  font-size: 1.1rem;
+  text-align: left;
+  font-size: 1.05rem;
   color: var(--accent);
-  letter-spacing: 2px;
+  letter-spacing: normal;
   margin: 0 0 10px 0;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .settings-section {
@@ -221,7 +221,7 @@
   background: var(--bg-panel);
   border: 1px solid rgba(212, 175, 55, 0.2);
   padding: 12px 5px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   text-align: center;
   color: var(--text-main);
   font-weight: 500;
@@ -232,14 +232,14 @@
 
 .strategy-card.active {
   border-color: var(--accent);
-  background: rgba(212, 175, 55, 0.1);
-  box-shadow: 0 0 10px rgba(212, 175, 55, 0.2);
+  background: #e8dbc2;
+  box-shadow: 0 2px 8px rgba(61, 47, 28, 0.06);
 }
 
 .strategy-details {
   padding: 12px;
   background: rgba(255, 250, 240, 0.8);
-  border-radius: 8px;
+  border-radius: var(--radius);
   border-left: 3px solid var(--accent);
   font-size: 0.85rem;
   color: var(--text-secondary);
@@ -256,18 +256,18 @@
 
 .start-analysis-btn {
   width: 100%;
-  background: #2ecc71;
-  color: var(--text-main);
+  background: linear-gradient(140deg, var(--accent) 0%, var(--accent-strong) 100%);
+  color: #fffaf1;
   border: none;
   padding: 16px;
-  border-radius: 10px;
-  font-weight: 700;
-  font-size: 0.95rem;
-  letter-spacing: 1px;
+  border-radius: var(--radius);
+  font-weight: 500;
+  font-size: 0.93rem;
+  letter-spacing: 0.01em;
   cursor: pointer;
-  transition: transform 0.2s, background-color 0.2s;
-  margin-top: 5px;    
-  margin-bottom: 30px; 
+  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.12s ease;
+  margin-top: 5px;
+  margin-bottom: 16px;
   position: relative;
   z-index: 60;
 }
@@ -283,19 +283,20 @@
 .add-strategy-btn {
   width: 100%;
   background: transparent;
-  border: 1px dashed var(--accent);
-  color: var(--accent);
+  border: 1px solid var(--line);
+  color: var(--accent-strong);
   padding: 12px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   cursor: pointer;
   font-size: 0.9rem;
-  transition: all 0.3s;
-  letter-spacing: 1px;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.12s ease;
+  letter-spacing: normal;
   margin-top: 5px;
 }
 
 .add-strategy-btn:hover {
-  background: rgba(212, 175, 55, 0.1);
+  background: #f0e6d0;
+  border-color: rgba(139, 107, 44, 0.38);
 }
 
 .custom-strategies-list {
@@ -312,14 +313,14 @@
   background: var(--bg-panel);
   border: 1px solid rgba(212, 175, 55, 0.2);
   padding: 12px 15px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   transition: all 0.2s;
 }
 
 .custom-strategy-item.active {
   border-color: var(--accent);
-  background: rgba(212, 175, 55, 0.1);
-  box-shadow: 0 0 10px rgba(212, 175, 55, 0.2);
+  background: #e8dbc2;
+  box-shadow: 0 2px 8px rgba(61, 47, 28, 0.06);
 }
 
 .custom-strat-info {
@@ -366,10 +367,10 @@
   background: var(--bg-panel);
   width: 100%;
   max-width: 400px;
-  border-radius: 16px;
+  border-radius: var(--radius);
   border: 1px solid rgba(212, 175, 55, 0.4);
   padding: 25px 20px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+  box-shadow: 0 4px 16px rgba(61, 47, 28, 0.12);
   box-sizing: border-box;
 }
 
@@ -398,7 +399,7 @@
   border: 1px solid rgba(107, 79, 29, 0.2);
   color: var(--text-main);
   padding: 12px 15px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   font-size: 1rem;
   outline: none;
   transition: border 0.3s;
@@ -431,15 +432,15 @@
   color: var(--text-soft);
   padding: 10px;
   text-align: center;
-  border-radius: 8px;
+  border-radius: var(--radius);
   font-size: 0.85rem;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.12s ease;
   user-select: none;
 }
 
 .indicator-toggle-btn.selected {
-  background: rgba(212, 175, 55, 0.15);
+  background: #e8dbc2;
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
@@ -457,8 +458,8 @@
   color: var(--bg-main);
   border: none;
   padding: 14px;
-  border-radius: 8px;
-  font-weight: 700;
+  border-radius: var(--radius);
+  font-weight: 500;
   cursor: pointer;
 }
 
@@ -467,8 +468,8 @@
   color: #e74c3c;
   border: 1px solid #e74c3c;
   padding: 12px;
-  border-radius: 8px;
-  font-weight: 600;
+  border-radius: var(--radius);
+  font-weight: 500;
 }
 
 .modal-cancel-btn {
@@ -494,20 +495,20 @@
 .demo-toggle-btn {
   width: 100%;
   background: transparent;
-  border: 1px dashed rgba(212, 175, 55, 0.4);
+  border: 1px solid var(--line);
   color: var(--text-soft);
   padding: 14px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   cursor: pointer;
   font-size: 0.85rem;
-  transition: all 0.3s;
-  letter-spacing: 1px;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.12s ease;
+  letter-spacing: normal;
   margin-top: 10px;
 }
 
 .demo-toggle-btn:hover {
-  background: rgba(212, 175, 55, 0.05);
-  border-color: rgba(212, 175, 55, 0.8);
+  background: #f0e6d0;
+  border-color: rgba(139, 107, 44, 0.38);
   color: var(--accent);
 }
 
@@ -517,7 +518,7 @@
 }
 
 .demo-toggle-btn.exit-mode:hover {
-  background: rgba(231, 76, 60, 0.1);
+  background: #f5e0dd;
 }
 
 
@@ -533,7 +534,6 @@
 .strategy-icon {
   font-size: 1.8rem;
   line-height: 1;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
 }
 
 .strategy-name-text {
@@ -551,7 +551,7 @@
   border: 1px solid rgba(212, 175, 55, 0.1);
   width: 42px;
   height: 42px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   flex-shrink: 0;
 }
 
@@ -564,7 +564,7 @@
 .icon-dropdown-trigger {
   background: var(--bg-main);
   border: 1px solid rgba(107, 79, 29, 0.2);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 10px 15px;
   display: flex;
   justify-content: space-between;
@@ -601,7 +601,7 @@
   width: 100%;
   background: var(--bg-panel);
   border: 1px solid rgba(212, 175, 55, 0.4);
-  border-radius: 8px;
+  border-radius: var(--radius);
   margin-top: 5px;
   padding: 12px;
   display: grid;
@@ -610,7 +610,7 @@
   max-height: 220px;
   overflow-y: auto;
   z-index: 1100;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+  box-shadow: 0 4px 16px rgba(61, 47, 28, 0.12);
   box-sizing: border-box;
 }
 
@@ -629,7 +629,7 @@
   justify-content: center;
   align-items: center;
   padding: 6px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
   border: 1px solid transparent;
   transition: all 0.2s;
@@ -637,12 +637,12 @@
 }
 
 .icon-choice-item:hover {
-  background: rgba(212, 175, 55, 0.1);
+  background: #f0e6d0;
   transform: scale(1.1);
 }
 
 .icon-choice-item.selected {
-  background: rgba(212, 175, 55, 0.2);
+  background: #e8dbc2;
   border-color: var(--accent);
   transform: scale(1.1);
 }

@@ -68,10 +68,10 @@ export default function LogAnalysis({ user }) {
               <div style={{ 
                 marginTop: '4px', 
                 fontSize: '0.8rem', 
-                fontWeight: 'bold', 
-                color: item.status === 'success' ? 'var(--success)' : 'var(--danger)', 
-                textTransform: 'uppercase', 
-                letterSpacing: '1px' 
+                fontWeight: '600',
+                color: item.status === 'success' ? 'var(--success)' : 'var(--danger)',
+                textTransform: 'none',
+                letterSpacing: 'normal' 
               }}>
                 {item.status === 'success' ? t.success : t.fail}
               </div>

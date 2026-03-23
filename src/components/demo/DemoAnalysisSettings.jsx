@@ -211,7 +211,7 @@ export default function DemoAnalysisSettings({
   const formatIndValue = (val) => {
     if (val === null || val === undefined) return '...';
     let num = (typeof val === 'object') ? (val.macd ?? val.k ?? val.e9 ?? val.lb ?? Object.values(val).find(v => typeof v === 'number')) : val;
-    if (typeof num === 'number') return Math.abs(num) < 0.1 ? num.toFixed(4) : num.toFixed(2);
+    if (typeof num === 'number') return num.toFixed(3);
     return String(val);
   };
 
@@ -246,7 +246,7 @@ export default function DemoAnalysisSettings({
       else customVotes.NEUTRAL += 1;
     });
 
-    const getDemoSignalChar = (sig) => sig === 'BUY' ? '^' : sig === 'SELL' ? '¡' : '?';
+    const getDemoSignalChar = (sig) => sig === 'BUY' ? '\u25B2' : sig === 'SELL' ? '\u25BC' : '\u25CF';
     const getDemoSignalColor = (sig) => sig === 'BUY' ? '#00FF00' : sig === 'SELL' ? '#FF4444' : '#FFD700';
     const currentPrice = data.price || data.key_levels?.current_price || '---';
     const assetObj = getAssetObject(analysisData.pair);
@@ -254,16 +254,16 @@ export default function DemoAnalysisSettings({
 
     return (
       <div className="profile-wrapper analysis-result-container">
-        <div style={{ textAlign: 'center', marginBottom: '15px' }}>
-          <h2 className="settings-main-title" style={{ fontSize: '1.7rem', margin: '0 0 6px 0', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+        <div className="analysis-head">
+          <h2 className="settings-main-title analysis-asset-title">
             <AssetIcon asset={assetObj} /> {assetObj.name}
           </h2>
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', fontFamily: '"Fira Code", monospace' }}>
-            <span style={{ background: 'rgba(139, 107, 44, 0.14)', color: 'var(--accent)', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold' }}>
+          <div className="analysis-meta-row">
+            <span style={{ background: 'rgba(139, 107, 44, 0.14)', color: 'var(--accent)', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: '500' }}>
               {analysisData.timeframe}
             </span>
-            <span style={{ color: 'var(--text-main)', fontSize: '1.1rem', fontWeight: 'bold' }}>
-              {typeof currentPrice === 'number' ? currentPrice.toFixed(2) : currentPrice}
+            <span style={{ color: 'var(--text-main)', fontSize: '1.1rem', fontWeight: '600' }}>
+              {typeof currentPrice === 'number' ? currentPrice.toFixed(3) : currentPrice}
             </span>
           </div>
         </div>
@@ -274,7 +274,7 @@ export default function DemoAnalysisSettings({
               <div key={key} className="ind-item">
                 <span className="ind-name">{key}</span>
                 <span className="ind-val">{formatIndValue(ind.value)}</span>
-                <span style={{ color: getDemoSignalColor(ind.signal), fontSize: '1.2rem', marginTop: '3px', fontWeight: 'bold' }}>
+                <span style={{ color: getDemoSignalColor(ind.signal), fontSize: '1.2rem', marginTop: '3px', fontWeight: '600' }}>
                   {getDemoSignalChar(ind.signal)}
                 </span>
               </div>
@@ -282,9 +282,9 @@ export default function DemoAnalysisSettings({
           </div>
           <div className="demo-indicator-summary">
             <div className="demo-summary-title">{globalT.demoSettings?.indicatorSummary || 'Indicator Summary'}</div>
-            <span style={{ color: '#00FF00' }}>^ {customVotes.BUY}</span>{' / '}
-            <span style={{ color: '#FFD700' }}>? {customVotes.NEUTRAL}</span>{' / '}
-            <span style={{ color: '#FF4444' }}>¡ {customVotes.SELL}</span>
+            <span style={{ color: '#00FF00' }}>{'\u25B2'} {customVotes.BUY}</span>{' / '}
+            <span style={{ color: '#FFD700' }}>{'\u25CF'} {customVotes.NEUTRAL}</span>{' / '}
+            <span style={{ color: '#FF4444' }}>{'\u25BC'} {customVotes.SELL}</span>
           </div>
 
           <div className="news-filter-block">
