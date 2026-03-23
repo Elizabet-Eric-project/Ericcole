@@ -619,7 +619,7 @@ async def cmd_start(message: types.Message):
         ]
     ])
     
-    photo_path = "media/menu.jpg"
+    photo_path = "media/menu.png"
     photo = FSInputFile(photo_path)
     
     await message.answer_photo(
