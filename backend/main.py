@@ -17,6 +17,23 @@ from typing import Optional
 
 load_dotenv()
 
+def get_env_int(name: str, default: int) -> int:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        print(f"[Config] Invalid {name}={raw!r}, fallback to {default}")
+        return default
+    if not (1 <= value <= 65535):
+        print(f"[Config] {name} out of range ({value}), fallback to {default}")
+        return default
+    return value
+
+API_HOST = (os.getenv("API_HOST") or "0.0.0.0").strip() or "0.0.0.0"
+API_PORT = get_env_int("API_PORT", 8000)
+
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
     "user": os.getenv("DB_USER"),
@@ -38,6 +55,15 @@ processing_ids = set()
 price_cache = {} 
 
 COMMODITY_SYMBOLS = ["HG1", "W_1", "C_1", "S_1", "KC1", "CC1", "SB1", "CT1"]
+
+@app.get("/api/support/links")
+async def get_support_links():
+    channel_url = (os.getenv("CHANNEL_URL") or "").strip()
+    support_url = (os.getenv("SUPPORT_URL") or "").strip()
+    return {
+        "channel_url": channel_url,
+        "support_url": support_url
+    }
 
 # --- ХЕЛПЕРЫ ДЛЯ ФОНОВОГО ОБРАБОТЧИКА ---
 def parse_timeframe_mins(tf: str) -> int:
@@ -624,7 +650,7 @@ async def cmd_start(message: types.Message):
     
     welcome_text = (
         f"Welcome, {user_name}! 👋\n\n"
-        f"<b>Eric Cole</b> | <code>Private Trading Analytics</code>\n\n"
+        f"<b>Elizabeth Vane</b> | <code>Private Trading Analytics</code>\n\n"
         f"A professional analytical space for those who value precision. "
         f"We've combined advanced technical analysis methods with the convenience of a Web App.\n\n"
         f"<i>Your market edge begins here.</i>"
@@ -633,13 +659,13 @@ async def cmd_start(message: types.Message):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text="👉 Open Eric Cole ✨", 
+                text="👉 Open Elizabeth Vane ✨", 
                 web_app=WebAppInfo(url=os.getenv("WEB_APP_URL"))
             )
         ]
     ])
     
-    photo_path = "media/menu.png"
+    photo_path = "media/menu.jpg"
     photo = FSInputFile(photo_path)
     
     await message.answer_photo(
@@ -722,7 +748,7 @@ async def start_bot():
     await dp.start_polling(bot)
 
 async def start_api():
-    config = uvicorn.Config(app, host="0.0.0.0", port=7999)
+    config = uvicorn.Config(app, host=API_HOST, port=API_PORT)
     server = uvicorn.Server(config)
     await server.serve()
 
