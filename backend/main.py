@@ -650,7 +650,7 @@ async def cmd_start(message: types.Message):
     
     welcome_text = (
         f"Welcome, {user_name}! 👋\n\n"
-        f"<b>Elizabeth Vane</b> | <code>Private Trading Analytics</code>\n\n"
+        f"<b>Eric Cole</b> | <code>Private Trading Analytics</code>\n\n"
         f"A professional analytical space for those who value precision. "
         f"We've combined advanced technical analysis methods with the convenience of a Web App.\n\n"
         f"<i>Your market edge begins here.</i>"
@@ -659,13 +659,13 @@ async def cmd_start(message: types.Message):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text="👉 Open Elizabeth Vane ✨", 
+                text="👉 Open Eric Cole ✨", 
                 web_app=WebAppInfo(url=os.getenv("WEB_APP_URL"))
             )
         ]
     ])
     
-    photo_path = "media/menu.jpg"
+    photo_path = "media/menu.png"
     photo = FSInputFile(photo_path)
     
     await message.answer_photo(
