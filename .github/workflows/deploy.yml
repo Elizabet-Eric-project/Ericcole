@@ -14,24 +14,42 @@ jobs:
     if: github.ref == 'refs/heads/test'
     runs-on: ubuntu-latest
     steps:
+      - name: Prepare SSH key
+        shell: bash
+        run: |
+          test -n "${{ secrets.SERVER_SSH_KEY_B64 }}" || { echo "SERVER_SSH_KEY_B64 is empty"; exit 1; }
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/gha_deploy
+          chmod 600 ~/.ssh/gha_deploy
+          ssh-keygen -y -f ~/.ssh/gha_deploy > /dev/null
+
       - name: SSH deploy TEST
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: 38.180.190.159
           username: root
           port: 22
-          key: ${{ secrets.SERVER_SSH_KEY }}
+          key_path: /home/runner/.ssh/gha_deploy
           script: /usr/local/bin/deploy_ericcole_test.sh
 
   deploy-prod:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
+      - name: Prepare SSH key
+        shell: bash
+        run: |
+          test -n "${{ secrets.SERVER_SSH_KEY_B64 }}" || { echo "SERVER_SSH_KEY_B64 is empty"; exit 1; }
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/gha_deploy
+          chmod 600 ~/.ssh/gha_deploy
+          ssh-keygen -y -f ~/.ssh/gha_deploy > /dev/null
+
       - name: SSH deploy PROD
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: 38.180.190.159
           username: root
           port: 22
-          key: ${{ secrets.SERVER_SSH_KEY }}
+          key_path: /home/runner/.ssh/gha_deploy
           script: /usr/local/bin/deploy_ericcole_prod.sh
