@@ -183,6 +183,21 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                 """
             )
 
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS admin_stream_settings (
+                    id INT NOT NULL PRIMARY KEY,
+                    is_enabled TINYINT(1) NOT NULL DEFAULT 0,
+                    scope VARCHAR(16) NOT NULL DEFAULT 'all',
+                    strategy_id BIGINT NULL,
+                    forced_signal VARCHAR(8) NOT NULL DEFAULT 'BUY',
+                    message TEXT NULL,
+                    updated_by BIGINT NULL,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+
         await _ensure_column(conn, db_name, "users", "strategy_id", "ALTER TABLE users ADD COLUMN strategy_id BIGINT NULL")
         await _ensure_column(conn, db_name, "users", "lang", "ALTER TABLE users ADD COLUMN lang VARCHAR(16) NOT NULL DEFAULT 'ru'")
         await _ensure_column(conn, db_name, "users", "mode", "ALTER TABLE users ADD COLUMN mode VARCHAR(16) NOT NULL DEFAULT 'forex'")
@@ -250,6 +265,55 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
             "admin_users",
             "granted_at",
             "ALTER TABLE admin_users ADD COLUMN granted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "is_enabled",
+            "ALTER TABLE admin_stream_settings ADD COLUMN is_enabled TINYINT(1) NOT NULL DEFAULT 0",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "scope",
+            "ALTER TABLE admin_stream_settings ADD COLUMN scope VARCHAR(16) NOT NULL DEFAULT 'all'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "strategy_id",
+            "ALTER TABLE admin_stream_settings ADD COLUMN strategy_id BIGINT NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "forced_signal",
+            "ALTER TABLE admin_stream_settings ADD COLUMN forced_signal VARCHAR(8) NOT NULL DEFAULT 'BUY'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "message",
+            "ALTER TABLE admin_stream_settings ADD COLUMN message TEXT NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "updated_by",
+            "ALTER TABLE admin_stream_settings ADD COLUMN updated_by BIGINT NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "updated_at",
+            "ALTER TABLE admin_stream_settings ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
         )
 
         await _ensure_index(conn, db_name, "users", "idx_users_strategy_id", "CREATE INDEX idx_users_strategy_id ON users(strategy_id)")
@@ -333,6 +397,14 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                 """
                 INSERT INTO ai_settings (id, system_prompt, model)
                 VALUES (1, 'You are a helpful trading assistant.', 'gpt-4o-mini')
+                ON DUPLICATE KEY UPDATE id = id
+                """
+            )
+
+            await cur.execute(
+                """
+                INSERT INTO admin_stream_settings (id, is_enabled, scope, strategy_id, forced_signal, message, updated_by)
+                VALUES (1, 0, 'all', NULL, 'BUY', '', NULL)
                 ON DUPLICATE KEY UPDATE id = id
                 """
             )

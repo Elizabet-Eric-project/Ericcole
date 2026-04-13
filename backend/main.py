@@ -152,6 +152,97 @@ async def get_admin_user(
         raise HTTPException(status_code=403, detail="Admin access denied")
     return user
 
+
+async def get_stream_settings_row():
+    default_settings = {
+        "is_enabled": 0,
+        "scope": "all",
+        "strategy_id": None,
+        "forced_signal": "BUY",
+        "message": "",
+        "updated_at": None,
+        "updated_by": None,
+    }
+    if not db_pool:
+        return default_settings
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT is_enabled, scope, strategy_id, forced_signal, message, updated_at, updated_by
+                FROM admin_stream_settings
+                WHERE id = 1
+                LIMIT 1
+                """
+            )
+            row = await cur.fetchone()
+    if not row:
+        return default_settings
+    settings = {**default_settings, **row}
+    settings["scope"] = str(settings.get("scope") or "all").strip().lower()
+    if settings["scope"] not in ("all", "strategy"):
+        settings["scope"] = "all"
+    forced = str(settings.get("forced_signal") or "BUY").strip().upper()
+    settings["forced_signal"] = forced if forced in ("BUY", "SELL") else "BUY"
+    settings["is_enabled"] = 1 if int(settings.get("is_enabled") or 0) == 1 else 0
+    try:
+        settings["strategy_id"] = int(settings["strategy_id"]) if settings.get("strategy_id") is not None else None
+    except (TypeError, ValueError):
+        settings["strategy_id"] = None
+    settings["message"] = str(settings.get("message") or "")
+    return settings
+
+
+async def resolve_stream_override(strategy_id: Optional[int]):
+    settings = await get_stream_settings_row()
+    if int(settings.get("is_enabled") or 0) != 1:
+        return None
+    scope = settings.get("scope") or "all"
+    if scope == "all":
+        return settings
+    target_strategy_id = settings.get("strategy_id")
+    if scope == "strategy" and target_strategy_id is not None and strategy_id is not None and int(target_strategy_id) == int(strategy_id):
+        return settings
+    return None
+
+
+def apply_stream_override_to_analysis(analysis_data: dict, stream_settings: dict) -> dict:
+    if not isinstance(analysis_data, dict):
+        return analysis_data
+    forced_signal = str(stream_settings.get("forced_signal") or "").upper()
+    if forced_signal not in ("BUY", "SELL"):
+        return analysis_data
+
+    indicators = analysis_data.get("indicators")
+    if isinstance(indicators, dict):
+        for _, indicator_data in indicators.items():
+            if isinstance(indicator_data, dict):
+                indicator_data["signal"] = forced_signal
+        indicator_count = len(indicators)
+    else:
+        indicator_count = 0
+
+    if forced_signal == "BUY":
+        votes = {"BUY": indicator_count or 1, "SELL": 0, "NEUTRAL": 0}
+        weighted_scores = {"buy": float(indicator_count or 1), "sell": 0.0, "neutral": 0.0}
+    else:
+        votes = {"BUY": 0, "SELL": indicator_count or 1, "NEUTRAL": 0}
+        weighted_scores = {"buy": 0.0, "sell": float(indicator_count or 1), "neutral": 0.0}
+
+    analysis_data["recommendation"] = forced_signal
+    analysis_data["votes"] = votes
+    analysis_data["weighted_scores"] = weighted_scores
+    analysis_data["confidence"] = 99
+    analysis_data["confidence_reason"] = "admin_stream_override"
+    analysis_data["stream_override"] = {
+        "active": True,
+        "scope": stream_settings.get("scope") or "all",
+        "strategy_id": stream_settings.get("strategy_id"),
+        "forced_signal": forced_signal,
+        "message": stream_settings.get("message") or "",
+    }
+    return analysis_data
+
 @app.get("/api/support/links")
 async def get_support_links():
     channel_url = (os.getenv("CHANNEL_URL") or "").strip()
@@ -517,16 +608,27 @@ async def admin_broadcast(request: Request, admin=Depends(get_admin_user)):
 
 @app.get("/api/admin/settings")
 async def admin_settings(admin=Depends(get_admin_user)):
+    stream_settings = await get_stream_settings_row()
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("SELECT id, system_prompt, model, updated_at FROM ai_settings WHERE id = 1")
             ai_settings = await cur.fetchone()
+            await cur.execute(
+                """
+                SELECT id, name, icon
+                FROM presets
+                ORDER BY is_system DESC, id ASC
+                """
+            )
+            stream_strategies = await cur.fetchall()
     if not ai_settings:
         ai_settings = {"id": 1, "system_prompt": "You are a helpful trading assistant.", "model": "gpt-4o-mini", "updated_at": None}
     return {
         "status": "success",
         "settings": {
             "ai": ai_settings,
+            "streams": stream_settings,
+            "stream_strategies": stream_strategies or [],
             "support": {
                 "channel_url": (os.getenv("CHANNEL_URL") or "").strip(),
                 "support_url": (os.getenv("SUPPORT_URL") or "").strip(),
@@ -539,6 +641,7 @@ async def admin_settings(admin=Depends(get_admin_user)):
 async def admin_settings_update(request: Request, admin=Depends(get_admin_user)):
     data = await request.json()
     ai_data = data.get("ai") or {}
+    streams_data = data.get("streams") or {}
     system_prompt = (ai_data.get("system_prompt") or "").strip()
     model = (ai_data.get("model") or "").strip()
 
@@ -559,6 +662,40 @@ async def admin_settings_update(request: Request, admin=Depends(get_admin_user))
                 """,
                 (system_prompt, model),
             )
+            if isinstance(streams_data, dict) and streams_data:
+                is_enabled = 1 if bool(streams_data.get("is_enabled")) else 0
+                scope = str(streams_data.get("scope") or "all").strip().lower()
+                if scope not in ("all", "strategy"):
+                    scope = "all"
+
+                strategy_id = streams_data.get("strategy_id")
+                try:
+                    strategy_id = int(strategy_id) if strategy_id is not None and str(strategy_id).strip() else None
+                except (TypeError, ValueError):
+                    strategy_id = None
+                if is_enabled == 1 and scope == "strategy" and strategy_id is None:
+                    raise HTTPException(status_code=400, detail="strategy_id is required when stream scope is strategy")
+
+                forced_signal = str(streams_data.get("forced_signal") or "BUY").strip().upper()
+                if forced_signal not in ("BUY", "SELL"):
+                    forced_signal = "BUY"
+                message = str(streams_data.get("message") or "").strip()[:1000]
+                updated_by = int(admin["user_id"])
+
+                await cur.execute(
+                    """
+                    INSERT INTO admin_stream_settings (id, is_enabled, scope, strategy_id, forced_signal, message, updated_by)
+                    VALUES (1, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        is_enabled = VALUES(is_enabled),
+                        scope = VALUES(scope),
+                        strategy_id = VALUES(strategy_id),
+                        forced_signal = VALUES(forced_signal),
+                        message = VALUES(message),
+                        updated_by = VALUES(updated_by)
+                    """,
+                    (is_enabled, scope, strategy_id, forced_signal, message, updated_by),
+                )
     return {"status": "success"}
 
 
@@ -1080,6 +1217,10 @@ async def create_forex_analysis(request: Request, user=Depends(get_telegram_user
     pair = data.get("pair")
     interval_raw = data.get("exp")
     strategy_id = data.get("strategy_id")
+    try:
+        strategy_id_int = int(strategy_id) if strategy_id is not None and str(strategy_id).strip() else None
+    except (TypeError, ValueError):
+        strategy_id_int = None
     allowed_indicators = data.get("allowed_indicators", [])
     exchange = data.get("exchange")
 
@@ -1134,6 +1275,9 @@ async def create_forex_analysis(request: Request, user=Depends(get_telegram_user
                 interval=interval,
                 allowed_indicators=allowed_indicators,
             )
+            stream_override = await resolve_stream_override(strategy_id_int)
+            if stream_override:
+                analysis_data = apply_stream_override_to_analysis(analysis_data, stream_override)
             news_data = await fetch_news_data()
         except httpx.HTTPStatusError as e:
             error_text = e.response.text

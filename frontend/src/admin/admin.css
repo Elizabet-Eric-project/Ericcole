@@ -468,6 +468,11 @@
   background: rgba(255, 250, 242, 0.9);
 }
 
+.admin-btn-outline.active {
+  background: rgba(143, 106, 46, 0.16);
+  border-color: rgba(143, 106, 46, 0.45);
+}
+
 .admin-btn-outline.danger {
   border-color: rgba(196, 90, 73, 0.5);
   color: #9a3225;
