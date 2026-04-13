@@ -1,4 +1,5 @@
 .log-filter-card {
+  position: relative;
   background: var(--bg-panel);
   border: 1px solid rgba(212, 175, 55, 0.22);
   border-radius: var(--radius);
@@ -22,10 +23,98 @@
   color: var(--text-main);
   font-size: 0.9rem;
   outline: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
 }
 
 .log-filter-select:focus {
   border-color: rgba(139, 107, 44, 0.5);
+}
+
+.log-filter-select.open {
+  border-color: rgba(139, 107, 44, 0.5);
+  box-shadow: 0 0 0 2px rgba(139, 107, 44, 0.08);
+}
+
+.log-filter-selected-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-filter-caret {
+  color: var(--text-soft);
+  transition: transform 0.2s ease;
+}
+
+.log-filter-caret.open {
+  transform: rotate(180deg);
+}
+
+.log-filter-menu {
+  margin-top: 8px;
+  border: 1px solid rgba(139, 107, 44, 0.25);
+  border-radius: 14px;
+  background: #403f3f;
+  color: #f5f2ea;
+  overflow: hidden;
+  max-height: 320px;
+  overflow-y: auto;
+  box-shadow: 0 10px 24px rgba(28, 26, 22, 0.28);
+  animation: fadeIn 0.16s ease-out;
+}
+
+.log-filter-option {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: inherit;
+  padding: 11px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  font-size: 1rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.log-filter-option:last-child {
+  border-bottom: 0;
+}
+
+.log-filter-option.active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.log-filter-option-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-filter-radio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.65);
+  position: relative;
+  flex-shrink: 0;
+}
+
+.log-filter-option.active .log-filter-radio::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: #f3efe6;
 }
 
 .log-winrate-card {
