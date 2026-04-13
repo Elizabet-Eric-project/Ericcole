@@ -261,6 +261,111 @@ async def resolve_stream_override(strategy_id: Optional[int]):
     return None
 
 
+async def get_user_strategy_id(user_id: int) -> Optional[int]:
+    if not db_pool:
+        return None
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    """
+                    SELECT strategy_id
+                    FROM users
+                    WHERE user_id = %s
+                    LIMIT 1
+                    """,
+                    (user_id,),
+                )
+                row = await cur.fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    try:
+        return int(row.get("strategy_id")) if row.get("strategy_id") is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def ensure_analysis_key_levels(analysis_data: dict, preferred_signal: Optional[str] = None) -> dict:
+    if not isinstance(analysis_data, dict):
+        return analysis_data
+
+    def to_float_or_none(value):
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    key_levels = analysis_data.get("key_levels")
+    if not isinstance(key_levels, dict):
+        key_levels = {}
+    indicators = analysis_data.get("indicators")
+    if not isinstance(indicators, dict):
+        indicators = {}
+
+    current_price = to_float_or_none(analysis_data.get("price"))
+    if current_price is None:
+        current_price = to_float_or_none(key_levels.get("current_price"))
+    if current_price is None:
+        analysis_data["key_levels"] = key_levels
+        return analysis_data
+    key_levels["current_price"] = round(current_price, 5)
+
+    current_signal = str(preferred_signal or analysis_data.get("recommendation") or "").strip().upper()
+    if current_signal not in ("BUY", "SELL", "NEUTRAL"):
+        current_signal = "NEUTRAL"
+
+    sl_value = to_float_or_none(key_levels.get("conservative_sl"))
+    tp_value = to_float_or_none(key_levels.get("rr_2_1_target"))
+    support_level = to_float_or_none(key_levels.get("nearest_support"))
+    resistance_level = to_float_or_none(key_levels.get("nearest_resistance"))
+
+    atr_value = to_float_or_none(key_levels.get("atr_14"))
+    if atr_value is None:
+        atr_indicator = indicators.get("ATR")
+        if isinstance(atr_indicator, dict):
+            atr_source = atr_indicator.get("value")
+            if isinstance(atr_source, dict):
+                atr_source = atr_source.get("atr")
+            atr_value = to_float_or_none(atr_source)
+        elif isinstance(atr_indicator, (int, float, str)):
+            atr_value = to_float_or_none(atr_indicator)
+
+    abs_price = abs(current_price)
+    atr_abs = abs(float(atr_value)) if atr_value is not None else 0.0
+    sl_step = max(atr_abs * 1.25, abs_price * 0.0008, 0.0001)
+    tp_step = max(atr_abs * 2.0, abs_price * 0.0016, 0.0002)
+
+    support_ok = support_level is not None and support_level < current_price
+    resistance_ok = resistance_level is not None and resistance_level > current_price
+
+    if sl_value is None:
+        if current_signal == "BUY":
+            sl_value = support_level if support_ok else current_price - sl_step
+        elif current_signal == "SELL":
+            sl_value = resistance_level if resistance_ok else current_price + sl_step
+        else:
+            sl_value = support_level if support_ok else current_price - sl_step
+        key_levels["conservative_sl"] = round(sl_value, 5)
+
+    if tp_value is None:
+        if current_signal == "BUY":
+            tp_value = resistance_level if resistance_ok else current_price + tp_step
+        elif current_signal == "SELL":
+            tp_value = support_level if support_ok else current_price - tp_step
+        else:
+            tp_value = resistance_level if resistance_ok else current_price + tp_step
+        key_levels["rr_2_1_target"] = round(tp_value, 5)
+
+    analysis_data["key_levels"] = key_levels
+    return analysis_data
+
+
 def apply_stream_override_to_analysis(analysis_data: dict, stream_settings: dict) -> dict:
     if not isinstance(analysis_data, dict):
         return analysis_data
@@ -467,7 +572,7 @@ def apply_stream_override_to_analysis(analysis_data: dict, stream_settings: dict
         "indicator_overrides": manual_overrides if manual_overrides else {},
         "message": stream_settings.get("message") or "",
     }
-    return analysis_data
+    return ensure_analysis_key_levels(analysis_data, preferred_signal=forced_signal)
 
 @app.get("/api/support/links")
 async def get_support_links():
@@ -1610,7 +1715,7 @@ async def get_news(user=Depends(get_telegram_user)):
 @app.post("/api/analysis/forex")
 async def create_forex_analysis(request: Request, user=Depends(get_telegram_user)):
     data = await request.json()
-    user_id = user["user_id"]
+    user_id = int(user["user_id"])
     pair = data.get("pair")
     interval_raw = data.get("exp")
     strategy_id = data.get("strategy_id")
@@ -1618,6 +1723,8 @@ async def create_forex_analysis(request: Request, user=Depends(get_telegram_user
         strategy_id_int = int(strategy_id) if strategy_id is not None and str(strategy_id).strip() else None
     except (TypeError, ValueError):
         strategy_id_int = None
+    if strategy_id_int is None:
+        strategy_id_int = await get_user_strategy_id(user_id)
     allowed_indicators = data.get("allowed_indicators", [])
     exchange = data.get("exchange")
 
@@ -1672,9 +1779,11 @@ async def create_forex_analysis(request: Request, user=Depends(get_telegram_user
                 interval=interval,
                 allowed_indicators=allowed_indicators,
             )
+            analysis_data = ensure_analysis_key_levels(analysis_data, preferred_signal=analysis_data.get("recommendation"))
             stream_override = await resolve_stream_override(strategy_id_int)
             if stream_override:
                 analysis_data = apply_stream_override_to_analysis(analysis_data, stream_override)
+            analysis_data = ensure_analysis_key_levels(analysis_data, preferred_signal=analysis_data.get("recommendation"))
             news_data = await fetch_news_data()
         except httpx.HTTPStatusError as e:
             error_text = e.response.text
@@ -1692,7 +1801,7 @@ async def create_forex_analysis(request: Request, user=Depends(get_telegram_user
                 INSERT INTO user_analyses (user_id, pair, timeframe, strategy_id, raw_data, news_data, status)
                 VALUES (%s, %s, %s, %s, %s, %s, 'active')
                 """,
-                (user_id, pair, interval_raw, strategy_id, json.dumps(analysis_data), json.dumps(news_data)),
+                (user_id, pair, interval_raw, strategy_id_int, json.dumps(analysis_data), json.dumps(news_data)),
             )
             analysis_id = cur.lastrowid
 
