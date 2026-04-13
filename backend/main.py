@@ -5,7 +5,7 @@ import httpx
 import json
 import secrets
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Request, Depends, HTTPException, Header
+from fastapi import FastAPI, Request, Depends, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
@@ -186,13 +186,39 @@ async def admin_me(admin=Depends(get_admin_user)):
 
 
 @app.get("/api/admin/stats")
-async def admin_stats(admin=Depends(get_admin_user)):
+async def admin_stats(
+    date_from: Optional[str] = Query(default=None),
+    date_to: Optional[str] = Query(default=None),
+    admin=Depends(get_admin_user),
+):
     async def safe_count(cur, sql: str) -> int:
         try:
             await cur.execute(sql)
             return int((await cur.fetchone() or {}).get("cnt") or 0)
         except Exception:
             return 0
+
+    from_dt = None
+    to_dt = None
+    if date_from:
+        try:
+            from_dt = datetime.strptime(date_from.strip(), "%Y-%m-%d")
+        except Exception:
+            from_dt = None
+    if date_to:
+        try:
+            to_dt = datetime.strptime(date_to.strip(), "%Y-%m-%d")
+        except Exception:
+            to_dt = None
+    if not to_dt:
+        to_dt = datetime.utcnow()
+    if not from_dt:
+        from_dt = to_dt - timedelta(days=6)
+    if from_dt > to_dt:
+        from_dt, to_dt = to_dt, from_dt
+
+    from_date = from_dt.strftime("%Y-%m-%d")
+    to_date = to_dt.strftime("%Y-%m-%d")
 
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -221,10 +247,11 @@ async def admin_stats(admin=Depends(get_admin_user)):
                     """
                     SELECT DATE(created_at) AS d, COUNT(*) AS cnt
                     FROM users
-                    WHERE created_at >= NOW() - INTERVAL 7 DAY
+                    WHERE DATE(created_at) BETWEEN %s AND %s
                     GROUP BY DATE(created_at)
                     ORDER BY d ASC
-                    """
+                    """,
+                    (from_date, to_date),
                 )
                 growth_rows = await cur.fetchall()
                 users_growth = [{"date": str(row["d"]), "count": int(row["cnt"])} for row in (growth_rows or [])]
@@ -240,6 +267,10 @@ async def admin_stats(admin=Depends(get_admin_user)):
             "chats_total": chats_total,
             "mode_breakdown": mode_breakdown,
             "users_growth_7d": users_growth,
+            "users_growth_period": {
+                "from": from_date,
+                "to": to_date,
+            },
         },
     }
 
