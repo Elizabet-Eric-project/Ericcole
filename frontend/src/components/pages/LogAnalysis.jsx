@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Loader from '../Loader/Loader';
+import { apiFetchJson } from '../../lib/api';
 import { texts } from '../../locales/texts';
 import './LogAnalysis.css';
 
@@ -10,15 +11,16 @@ export default function LogAnalysis({ user }) {
   const t = texts.en.logAnalysis;
 
   useEffect(() => {
-    if (user?.user_id) {
-      fetch(`/api/analysis/history?user_id=${user.user_id}`)
-        .then(res => res.json())
+    if (user) {
+      apiFetchJson('/api/analysis/history')
         .then(data => {
           setHistory(data.history || []);
           setStats(data.stats || { success: 0, fail: 0, total: 0 });
           setLoading(false);
         })
         .catch(() => setLoading(false));
+    } else {
+      setLoading(false);
     }
   }, [user]);
 

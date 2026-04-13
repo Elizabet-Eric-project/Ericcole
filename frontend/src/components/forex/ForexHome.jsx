@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useState } from 'react';
 import Lottie from 'lottie-react';
 import animationData from '../../assets/animation.json';
+import { apiFetchJson } from '../../lib/api';
 import './Forex.css';
 
 export default function ForexHome({ t: globalT, onStartAnalysis, user, onOpenActiveAnalysis, strategies = [] }) {
@@ -10,9 +11,8 @@ export default function ForexHome({ t: globalT, onStartAnalysis, user, onOpenAct
   const [showList, setShowList] = useState(false);
 
   useEffect(() => {
-    if (user?.user_id) {
-      fetch(`/api/analysis/active?user_id=${user.user_id}`)
-        .then(res => res.json())
+    if (user) {
+      apiFetchJson('/api/analysis/active')
         .then(data => {
           if (data.analyses && data.analyses.length > 0) {
             setActiveAnalyses(data.analyses);
@@ -95,3 +95,4 @@ export default function ForexHome({ t: globalT, onStartAnalysis, user, onOpenAct
     </div>
   );
 }
+

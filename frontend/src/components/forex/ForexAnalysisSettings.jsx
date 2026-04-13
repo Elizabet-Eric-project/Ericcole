@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import Loader from '../Loader/Loader';
 import Lottie from 'lottie-react';
 import animationData from '../../assets/analize.json';
@@ -6,6 +6,7 @@ import './ForexAnalysisSettings.css';
 import iconEdit from '../../assets/icons/edit.svg?url';
 import TradingViewChart from './TradingViewChart';
 import NewsModal from './NewsModal';
+import { apiFetchJson } from '../../lib/api';
 
 import * as Flags from 'country-flag-icons/react/3x2';
 
@@ -127,10 +128,10 @@ export default function ForexAnalysisSettings({
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/pairs/forex').then(res => res.ok ? res.json() : { pairs: [] }),
-      fetch('/api/pairs/indices').then(res => res.ok ? res.json() : []),
-      fetch('/api/pairs/commodity').then(res => res.ok ? res.json() : []),
-      fetch('/api/pairs/otc/stocks').then(res => res.ok ? res.json() : { assets: [] })
+      apiFetchJson('/api/pairs/forex').catch(() => ({ pairs: [] })),
+      apiFetchJson('/api/pairs/indices').catch(() => []),
+      apiFetchJson('/api/pairs/commodity').catch(() => []),
+      apiFetchJson('/api/pairs/otc/stocks').catch(() => ({ assets: [] }))
     ])
     .then(([forexData, indicesData, commData, stocksData]) => {
       const formatted = {
@@ -155,8 +156,7 @@ export default function ForexAnalysisSettings({
     });
 
     if (!activeAnalysisPreload) {
-      fetch('/api/news')
-        .then(res => res.json())
+      apiFetchJson('/api/news')
         .then(data => setNews(data))
         .catch(err => console.error("News fetch error", err));
     }
@@ -280,11 +280,9 @@ export default function ForexAnalysisSettings({
       ? selectedStrategy.indicator_keys.split(',').map(s => s.trim().toUpperCase()) 
       : [];
     try {
-      const response = await fetch('/api/analysis/forex', {
+      const result = await apiFetchJson('/api/analysis/forex', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: user.user_id,
           pair: forexParams.pair,
           exp: forexParams.exp,
           strategy_id: user.strategy_id,
@@ -292,7 +290,6 @@ export default function ForexAnalysisSettings({
           exchange: assetObj?.exchange || null
         })
       });
-      const result = await response.json();
       const elapsedTime = Date.now() - startTime;
       const remainingWait = uiDelay - elapsedTime;
       if (remainingWait > 0) await new Promise(resolve => setTimeout(resolve, remainingWait));
@@ -319,10 +316,9 @@ export default function ForexAnalysisSettings({
 
   const handleMarkStatus = async (status) => {
     if (!analysisData?.id) return;
-    await fetch('/api/analysis/status', {
+    await apiFetchJson('/api/analysis/status', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ analysis_id: analysisData.id, status, user_id: user.user_id })
+      body: JSON.stringify({ analysis_id: analysisData.id, status })
     });
     setAnalysisData(null);
     onGoHome();
@@ -386,7 +382,7 @@ export default function ForexAnalysisSettings({
           <div className="analysis-strategy-row">
             {t.strategyLabel}: 
             <span className="analysis-strategy-value">
-              <span style={{ fontSize: '1.1em' }}>{safeRender(selectedStrategy.icon, '⚡')}</span> 
+              <span style={{ fontSize: '1.1em' }}>{safeRender(selectedStrategy.icon, 'вљЎ')}</span> 
               {safeRender(selectedStrategy.name || analysisData.strategy_name || 'Custom Strategy')}
             </span>
           </div>
@@ -433,11 +429,11 @@ export default function ForexAnalysisSettings({
               <div className="nf-safe-box" style={{ marginBottom: '10px' }}>{t.noNewsExpected}</div>
             ) : newsStatus.isWarning ? (
               <div className="nf-caution-box" style={{ marginBottom: '10px' }}>
-                <div className="nf-caution-title">⚠️ {t.cautionTrade}</div>
+                <div className="nf-caution-title">вљ пёЏ {t.cautionTrade}</div>
                 <div className="nf-events-list" style={{ marginTop: '10px' }}>
                   {newsStatus.warningEvents.slice(0, 3).map((ev, i) => (
                     <div key={i} className="nf-event-item impact-high">
-                      🔴 {ev.time ? ev.time.split(' ')[1]?.substring(0, 5) : ''} {safeRender(ev.currency)} - {safeRender(ev.event)}
+                      рџ”ґ {ev.time ? ev.time.split(' ')[1]?.substring(0, 5) : ''} {safeRender(ev.currency)} - {safeRender(ev.event)}
                     </div>
                   ))}
                 </div>
@@ -445,7 +441,7 @@ export default function ForexAnalysisSettings({
               </div>
             ) : (
               <div className="nf-safe-box" style={{ marginBottom: '10px' }}>
-                ✅ {t.calmMarket}
+                вњ… {t.calmMarket}
                 <button className="add-strategy-outline-btn" style={{ marginTop: '10px', borderColor: 'var(--success)', color: 'var(--success)' }} onClick={() => setIsNewsModalOpen(true)}>{t.showNewsBtn}</button>
               </div>
             )}
@@ -471,7 +467,7 @@ export default function ForexAnalysisSettings({
 
         <div className="action-buttons-grid">
           <button className="btn-success-mark" onClick={() => handleMarkStatus('success')}>{t.successBtn}</button>
-          <button className="btn-skip-mark" onClick={() => handleMarkStatus('skipped')}>{t.skipBtn || 'Пропустить'}</button>
+          <button className="btn-skip-mark" onClick={() => handleMarkStatus('skipped')}>{t.skipBtn || 'РџСЂРѕРїСѓСЃС‚РёС‚СЊ'}</button>
           <button className="btn-fail-mark" onClick={() => handleMarkStatus('fail')}>{t.failBtn}</button>
         </div>
 
@@ -534,7 +530,7 @@ export default function ForexAnalysisSettings({
       {isSelectingExp && (
         <div className="step-container fade-in">
           <h3 className="settings-main-title">{t.selectExpiration}</h3>
-          <div className="exp-section-title">✅</div>
+          <div className="exp-section-title">вњ…</div>
           <div className="exp-grid">
             {recommendedExp.map((exp) => (
               <button key={exp} className={`exp-item-btn ${forexParams.exp === exp ? 'active' : ''}`} onClick={() => { setForexParams({ ...forexParams, exp }); setEditMode(null); }}>
@@ -545,7 +541,7 @@ export default function ForexAnalysisSettings({
 
           {unavailableExp.length > 0 && (
             <>
-              <div className="exp-section-title">❌</div>
+              <div className="exp-section-title">вќЊ</div>
               <div className="exp-grid">
                 {unavailableExp.map((exp) => (
                   <button key={exp} className={`exp-item-btn ${forexParams.exp === exp ? 'active' : ''}`} onClick={() => { setForexParams({ ...forexParams, exp }); setEditMode(null); }}>
@@ -564,7 +560,7 @@ export default function ForexAnalysisSettings({
           <div className="strategies-grid">
             {strategies.map((strat) => (
               <button key={strat.id} className={`strategy-item-btn ${Number(user.strategy_id) === Number(strat.id) ? 'active' : ''}`} onClick={() => { onUpdateStrategy(strat.id); setEditMode(null); }}>
-                <span style={{ fontSize: '1.2rem' }}>{safeRender(strat.icon || '⚡')}</span>
+                <span style={{ fontSize: '1.2rem' }}>{safeRender(strat.icon || 'вљЎ')}</span>
                 <span>{safeRender(strat.name)}</span>
               </button>
             ))}
@@ -602,7 +598,7 @@ export default function ForexAnalysisSettings({
               <div className="summary-info">
                 <span className="summary-label">{t.strategyLabel}</span>
                 <span className="summary-value" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '1.1em' }}>{safeRender(selectedStrategy.icon, '⚡')}</span>
+                  <span style={{ fontSize: '1.1em' }}>{safeRender(selectedStrategy.icon, 'вљЎ')}</span>
                   {safeRender(selectedStrategy.name || '...')}
                 </span>
               </div>
@@ -615,4 +611,5 @@ export default function ForexAnalysisSettings({
     </div>
   );
 }
+
 
