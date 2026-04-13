@@ -4,7 +4,7 @@ import aiomysql
 import httpx
 import json
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
@@ -736,6 +736,8 @@ async def send_chat_message(request: AIChatRequest, user=Depends(get_telegram_us
     if not request.text or not request.chat_id:
         return {"error": "text and chat_id are required"}
     result = await ai_service.process_user_message(db_pool, user_id, request.chat_id, request.text)
+    if result.get("status") != "success":
+        raise HTTPException(status_code=502, detail=result.get("error") or "AI provider request failed")
     return result
 
 @app.post("/api/ai/chat/history")

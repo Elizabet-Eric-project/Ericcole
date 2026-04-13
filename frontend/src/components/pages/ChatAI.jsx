@@ -115,6 +115,13 @@ export default function ChatAI({ user, t }) {
       }
     } catch (e) {
       console.error(e);
+      const fallbackText = e?.message || 'AI service is temporarily unavailable. Please try again in a moment.';
+      setMessages((prev) => [...prev, {
+        id: Date.now() + 2,
+        role: 'ai',
+        text: fallbackText,
+        timestamp: new Date().toISOString(),
+      }]);
     } finally {
       setIsThinking(false);
     }
