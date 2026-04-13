@@ -160,6 +160,11 @@ async def get_stream_settings_row():
         "scope": "all",
         "strategy_id": None,
         "forced_signal": "BUY",
+        "levels_mode": "auto",
+        "manual_conservative_sl": None,
+        "manual_take_profit": None,
+        "indicator_mode": "auto",
+        "indicator_overrides": {},
         "message": "",
         "updated_at": None,
         "updated_by": None,
@@ -170,7 +175,19 @@ async def get_stream_settings_row():
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute(
                 """
-                SELECT is_enabled, scope, strategy_id, forced_signal, message, updated_at, updated_by
+                SELECT
+                    is_enabled,
+                    scope,
+                    strategy_id,
+                    forced_signal,
+                    levels_mode,
+                    manual_conservative_sl,
+                    manual_take_profit,
+                    indicator_mode,
+                    indicator_overrides,
+                    message,
+                    updated_at,
+                    updated_by
                 FROM admin_stream_settings
                 WHERE id = 1
                 LIMIT 1
@@ -186,10 +203,47 @@ async def get_stream_settings_row():
     forced = str(settings.get("forced_signal") or "BUY").strip().upper()
     settings["forced_signal"] = forced if forced in ("BUY", "SELL") else "BUY"
     settings["is_enabled"] = 1 if int(settings.get("is_enabled") or 0) == 1 else 0
+    levels_mode = str(settings.get("levels_mode") or "auto").strip().lower()
+    settings["levels_mode"] = levels_mode if levels_mode in ("auto", "manual") else "auto"
+    try:
+        settings["manual_conservative_sl"] = (
+            float(settings["manual_conservative_sl"]) if settings.get("manual_conservative_sl") is not None else None
+        )
+    except (TypeError, ValueError):
+        settings["manual_conservative_sl"] = None
+    try:
+        settings["manual_take_profit"] = (
+            float(settings["manual_take_profit"]) if settings.get("manual_take_profit") is not None else None
+        )
+    except (TypeError, ValueError):
+        settings["manual_take_profit"] = None
+    indicator_mode = str(settings.get("indicator_mode") or "auto").strip().lower()
+    settings["indicator_mode"] = indicator_mode if indicator_mode in ("auto", "manual") else "auto"
     try:
         settings["strategy_id"] = int(settings["strategy_id"]) if settings.get("strategy_id") is not None else None
     except (TypeError, ValueError):
         settings["strategy_id"] = None
+    overrides_raw = settings.get("indicator_overrides")
+    if isinstance(overrides_raw, dict):
+        parsed_overrides = overrides_raw
+    elif isinstance(overrides_raw, str) and overrides_raw.strip():
+        try:
+            parsed_overrides = json.loads(overrides_raw)
+        except Exception:
+            parsed_overrides = {}
+    else:
+        parsed_overrides = {}
+    if not isinstance(parsed_overrides, dict):
+        parsed_overrides = {}
+    normalized_overrides = {}
+    for raw_key, raw_signal in parsed_overrides.items():
+        key_norm = str(raw_key or "").strip().upper().replace(" ", "").replace("_", "").replace("-", "")
+        if not key_norm:
+            continue
+        signal = str(raw_signal or "").strip().upper()
+        if signal in ("BUY", "SELL", "NEUTRAL"):
+            normalized_overrides[key_norm] = signal
+    settings["indicator_overrides"] = normalized_overrides
     settings["message"] = str(settings.get("message") or "")
     return settings
 
@@ -214,6 +268,45 @@ def apply_stream_override_to_analysis(analysis_data: dict, stream_settings: dict
     if forced_signal not in ("BUY", "SELL"):
         return analysis_data
 
+    def normalize_alias(value: str) -> str:
+        return str(value or "").strip().upper().replace(" ", "").replace("_", "").replace("-", "")
+
+    alias_map = {
+        "RSI": ["RSI"],
+        "MACD": ["MACD"],
+        "STOCH": ["STOCH", "STOCHASTIC"],
+        "BB": ["BB", "BOLLINGERBANDS", "BOLLINGERBAND"],
+        "EMA9_21": ["EMA9", "EMA21", "EMA921"],
+        "EMA50": ["EMA50"],
+        "EMA200": ["EMA200"],
+        "ADX": ["ADX"],
+        "CCI": ["CCI"],
+        "PSAR": ["PSAR", "PARABOLICSAR"],
+        "DMI": ["DMI"],
+        "SUPERTREND": ["SUPERTREND"],
+        "ICHIMOKU": ["ICHIMOKU"],
+        "PIVOTPOINTS": ["PIVOTPOINTS", "PIVOTPOINTSHL"],
+        "ATR": ["ATR"],
+        "FIBONACCI": ["FIBONACCI"],
+    }
+
+    def aliases_for_indicator(indicator_name: str):
+        base = normalize_alias(indicator_name)
+        aliases = {base}
+        for map_key, candidates in alias_map.items():
+            if base == normalize_alias(map_key):
+                aliases.update(normalize_alias(item) for item in candidates)
+                return aliases
+        return aliases
+
+    stream_scope = str(stream_settings.get("scope") or "all").strip().lower()
+    indicator_mode = str(stream_settings.get("indicator_mode") or "auto").strip().lower()
+    manual_overrides = stream_settings.get("indicator_overrides") or {}
+    if not isinstance(manual_overrides, dict):
+        manual_overrides = {}
+    if indicator_mode != "manual" or stream_scope != "strategy":
+        manual_overrides = {}
+
     indicators = analysis_data.get("indicators")
     votes = {"BUY": 0, "SELL": 0, "NEUTRAL": 0}
     weighted_scores = {"buy": 0.0, "sell": 0.0, "neutral": 0.0}
@@ -222,17 +315,34 @@ def apply_stream_override_to_analysis(analysis_data: dict, stream_settings: dict
         indicator_keys = list(indicators.keys())
         indicator_count = len(indicator_keys)
 
-        opposite_signal = "SELL" if forced_signal == "BUY" else "BUY"
-        if indicator_count <= 1:
-            majority_count = indicator_count
-        else:
-            strict_majority = (indicator_count // 2) + 1
-            min_majority = max(strict_majority, int(indicator_count * 0.56))
-            max_majority = max(min_majority, int(indicator_count * 0.78))
-            majority_count = random.randint(min_majority, max_majority)
-            majority_count = min(majority_count, indicator_count - 1)
+        locked_signals = {}
+        for indicator_key in indicator_keys:
+            for alias in aliases_for_indicator(indicator_key):
+                manual_signal = str(manual_overrides.get(alias) or "").strip().upper()
+                if manual_signal in ("BUY", "SELL", "NEUTRAL"):
+                    locked_signals[indicator_key] = manual_signal
+                    break
 
-        non_majority_count = max(0, indicator_count - majority_count)
+        opposite_signal = "SELL" if forced_signal == "BUY" else "BUY"
+        forced_locked = sum(1 for signal in locked_signals.values() if signal == forced_signal)
+        remaining_keys = [key for key in indicator_keys if key not in locked_signals]
+        remaining_count = len(remaining_keys)
+
+        if indicator_count <= 1:
+            target_forced = indicator_count
+        else:
+            required_majority = (indicator_count // 2) + 1
+            min_target = max(required_majority, int(indicator_count * 0.56))
+            max_target = max(min_target, int(indicator_count * 0.78))
+            max_possible_forced = forced_locked + remaining_count
+            if max_possible_forced <= min_target:
+                target_forced = max_possible_forced
+            else:
+                target_forced = random.randint(min_target, min(max_target, max_possible_forced))
+
+        forced_from_remaining = max(0, target_forced - forced_locked)
+        forced_from_remaining = min(forced_from_remaining, remaining_count)
+        non_majority_count = max(0, remaining_count - forced_from_remaining)
         neutral_count = 0
         opposite_count = 0
         if non_majority_count > 0:
@@ -243,17 +353,20 @@ def apply_stream_override_to_analysis(analysis_data: dict, stream_settings: dict
                 opposite_count = 1
                 neutral_count = non_majority_count - opposite_count
 
-        assigned_signals = (
-            [forced_signal] * majority_count
+        generated_signals = (
+            [forced_signal] * forced_from_remaining
             + ["NEUTRAL"] * neutral_count
             + [opposite_signal] * opposite_count
         )
-        random.shuffle(assigned_signals)
+        random.shuffle(generated_signals)
+        generated_by_key = {}
+        for idx, indicator_key in enumerate(remaining_keys):
+            generated_by_key[indicator_key] = generated_signals[idx] if idx < len(generated_signals) else forced_signal
 
-        for idx, indicator_key in enumerate(indicator_keys):
+        for indicator_key in indicator_keys:
             indicator_data = indicators.get(indicator_key)
             if isinstance(indicator_data, dict):
-                signal = assigned_signals[idx] if idx < len(assigned_signals) else forced_signal
+                signal = locked_signals.get(indicator_key) or generated_by_key.get(indicator_key) or forced_signal
                 indicator_data["signal"] = signal
                 votes[signal] = votes.get(signal, 0) + 1
     else:
@@ -275,12 +388,39 @@ def apply_stream_override_to_analysis(analysis_data: dict, stream_settings: dict
     analysis_data["votes"] = votes
     analysis_data["weighted_scores"] = weighted_scores
     analysis_data["confidence"] = confidence
+
+    levels_mode = str(stream_settings.get("levels_mode") or "auto").strip().lower()
+    if levels_mode == "manual":
+        raw_sl = stream_settings.get("manual_conservative_sl")
+        raw_tp = stream_settings.get("manual_take_profit")
+        try:
+            manual_sl = float(raw_sl) if raw_sl is not None else None
+        except (TypeError, ValueError):
+            manual_sl = None
+        try:
+            manual_tp = float(raw_tp) if raw_tp is not None else None
+        except (TypeError, ValueError):
+            manual_tp = None
+        key_levels = analysis_data.get("key_levels")
+        if not isinstance(key_levels, dict):
+            key_levels = {}
+        if manual_sl is not None:
+            key_levels["conservative_sl"] = round(manual_sl, 5)
+        if manual_tp is not None:
+            key_levels["rr_2_1_target"] = round(manual_tp, 5)
+        analysis_data["key_levels"] = key_levels
+
     analysis_data["confidence_reason"] = "admin_stream_override"
     analysis_data["stream_override"] = {
         "active": True,
         "scope": stream_settings.get("scope") or "all",
         "strategy_id": stream_settings.get("strategy_id"),
         "forced_signal": forced_signal,
+        "levels_mode": levels_mode,
+        "manual_conservative_sl": stream_settings.get("manual_conservative_sl"),
+        "manual_take_profit": stream_settings.get("manual_take_profit"),
+        "indicator_mode": stream_settings.get("indicator_mode") or "auto",
+        "indicator_overrides": manual_overrides if manual_overrides else {},
         "message": stream_settings.get("message") or "",
     }
     return analysis_data
@@ -657,9 +797,19 @@ async def admin_settings(admin=Depends(get_admin_user)):
             ai_settings = await cur.fetchone()
             await cur.execute(
                 """
-                SELECT id, name, icon
-                FROM presets
-                ORDER BY is_system DESC, id ASC
+                SELECT
+                    p.id,
+                    p.name,
+                    p.icon,
+                    p.is_system,
+                    p.allowed_timeframes,
+                    GROUP_CONCAT(i.name ORDER BY i.id SEPARATOR ', ') AS indicators_list,
+                    GROUP_CONCAT(i.`key` ORDER BY i.id SEPARATOR ',') AS indicator_keys
+                FROM presets p
+                LEFT JOIN preset_indicators pi ON pi.preset_id = p.id
+                LEFT JOIN indicators i ON i.id = pi.indicator_id
+                GROUP BY p.id
+                ORDER BY p.is_system DESC, p.id ASC
                 """
             )
             stream_strategies = await cur.fetchall()
@@ -722,21 +872,85 @@ async def admin_settings_update(request: Request, admin=Depends(get_admin_user))
                 if forced_signal not in ("BUY", "SELL"):
                     forced_signal = "BUY"
                 message = str(streams_data.get("message") or "").strip()[:1000]
+                levels_mode = str(streams_data.get("levels_mode") or "auto").strip().lower()
+                if levels_mode not in ("auto", "manual"):
+                    levels_mode = "auto"
+
+                raw_sl = streams_data.get("manual_conservative_sl")
+                raw_tp = streams_data.get("manual_take_profit")
+                try:
+                    manual_conservative_sl = float(raw_sl) if raw_sl is not None and str(raw_sl).strip() else None
+                except (TypeError, ValueError):
+                    manual_conservative_sl = None
+                try:
+                    manual_take_profit = float(raw_tp) if raw_tp is not None and str(raw_tp).strip() else None
+                except (TypeError, ValueError):
+                    manual_take_profit = None
+                if levels_mode == "manual" and (manual_conservative_sl is None or manual_take_profit is None):
+                    raise HTTPException(status_code=400, detail="manual levels require conservative_sl and take_profit")
+
+                indicator_mode = str(streams_data.get("indicator_mode") or "auto").strip().lower()
+                if indicator_mode not in ("auto", "manual"):
+                    indicator_mode = "auto"
+
+                raw_indicator_overrides = streams_data.get("indicator_overrides")
+                indicator_overrides = {}
+                if isinstance(raw_indicator_overrides, dict):
+                    for raw_key, raw_signal in raw_indicator_overrides.items():
+                        key_norm = str(raw_key or "").strip().upper().replace(" ", "").replace("_", "").replace("-", "")
+                        if not key_norm:
+                            continue
+                        signal = str(raw_signal or "").strip().upper()
+                        if signal in ("BUY", "SELL", "NEUTRAL"):
+                            indicator_overrides[key_norm] = signal
+                if scope != "strategy" or indicator_mode != "manual":
+                    indicator_overrides = {}
+                indicator_overrides_json = json.dumps(indicator_overrides, ensure_ascii=False)
                 updated_by = int(admin["user_id"])
 
                 await cur.execute(
                     """
-                    INSERT INTO admin_stream_settings (id, is_enabled, scope, strategy_id, forced_signal, message, updated_by)
-                    VALUES (1, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO admin_stream_settings (
+                        id,
+                        is_enabled,
+                        scope,
+                        strategy_id,
+                        forced_signal,
+                        levels_mode,
+                        manual_conservative_sl,
+                        manual_take_profit,
+                        indicator_mode,
+                        indicator_overrides,
+                        message,
+                        updated_by
+                    )
+                    VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         is_enabled = VALUES(is_enabled),
                         scope = VALUES(scope),
                         strategy_id = VALUES(strategy_id),
                         forced_signal = VALUES(forced_signal),
+                        levels_mode = VALUES(levels_mode),
+                        manual_conservative_sl = VALUES(manual_conservative_sl),
+                        manual_take_profit = VALUES(manual_take_profit),
+                        indicator_mode = VALUES(indicator_mode),
+                        indicator_overrides = VALUES(indicator_overrides),
                         message = VALUES(message),
                         updated_by = VALUES(updated_by)
                     """,
-                    (is_enabled, scope, strategy_id, forced_signal, message, updated_by),
+                    (
+                        is_enabled,
+                        scope,
+                        strategy_id,
+                        forced_signal,
+                        levels_mode,
+                        manual_conservative_sl,
+                        manual_take_profit,
+                        indicator_mode,
+                        indicator_overrides_json,
+                        message,
+                        updated_by,
+                    ),
                 )
     return {"status": "success"}
 

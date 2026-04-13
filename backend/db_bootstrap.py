@@ -191,6 +191,11 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     scope VARCHAR(16) NOT NULL DEFAULT 'all',
                     strategy_id BIGINT NULL,
                     forced_signal VARCHAR(8) NOT NULL DEFAULT 'BUY',
+                    levels_mode VARCHAR(16) NOT NULL DEFAULT 'auto',
+                    manual_conservative_sl DOUBLE NULL,
+                    manual_take_profit DOUBLE NULL,
+                    indicator_mode VARCHAR(16) NOT NULL DEFAULT 'auto',
+                    indicator_overrides LONGTEXT NULL,
                     message TEXT NULL,
                     updated_by BIGINT NULL,
                     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -293,6 +298,41 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
             "admin_stream_settings",
             "forced_signal",
             "ALTER TABLE admin_stream_settings ADD COLUMN forced_signal VARCHAR(8) NOT NULL DEFAULT 'BUY'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "levels_mode",
+            "ALTER TABLE admin_stream_settings ADD COLUMN levels_mode VARCHAR(16) NOT NULL DEFAULT 'auto'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "manual_conservative_sl",
+            "ALTER TABLE admin_stream_settings ADD COLUMN manual_conservative_sl DOUBLE NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "manual_take_profit",
+            "ALTER TABLE admin_stream_settings ADD COLUMN manual_take_profit DOUBLE NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "indicator_mode",
+            "ALTER TABLE admin_stream_settings ADD COLUMN indicator_mode VARCHAR(16) NOT NULL DEFAULT 'auto'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "indicator_overrides",
+            "ALTER TABLE admin_stream_settings ADD COLUMN indicator_overrides LONGTEXT NULL",
         )
         await _ensure_column(
             conn,
@@ -403,8 +443,21 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
 
             await cur.execute(
                 """
-                INSERT INTO admin_stream_settings (id, is_enabled, scope, strategy_id, forced_signal, message, updated_by)
-                VALUES (1, 0, 'all', NULL, 'BUY', '', NULL)
+                INSERT INTO admin_stream_settings (
+                    id,
+                    is_enabled,
+                    scope,
+                    strategy_id,
+                    forced_signal,
+                    levels_mode,
+                    manual_conservative_sl,
+                    manual_take_profit,
+                    indicator_mode,
+                    indicator_overrides,
+                    message,
+                    updated_by
+                )
+                VALUES (1, 0, 'all', NULL, 'BUY', 'auto', NULL, NULL, 'auto', '{}', '', NULL)
                 ON DUPLICATE KEY UPDATE id = id
                 """
             )
