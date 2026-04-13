@@ -14,7 +14,6 @@ export default function SettingsPage({ adminUser }) {
   const [streamScope, setStreamScope] = useState('all');
   const [streamStrategyId, setStreamStrategyId] = useState('');
   const [streamSignal, setStreamSignal] = useState('BUY');
-  const [streamMessage, setStreamMessage] = useState('');
   const [streamStrategies, setStreamStrategies] = useState([]);
 
   const [systemAccessEnabled, setSystemAccessEnabled] = useState(true);
@@ -56,7 +55,6 @@ export default function SettingsPage({ adminUser }) {
           : ''
       );
       setStreamSignal((streams.forced_signal || 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY');
-      setStreamMessage(streams.message || '');
       setStreamStrategies(settingsRes?.settings?.stream_strategies || []);
     } catch (e) {
       setError(e.message || 'Не удалось загрузить настройки');
@@ -90,7 +88,6 @@ export default function SettingsPage({ adminUser }) {
             scope: streamScope,
             strategy_id: streamScope === 'strategy' ? Number(streamStrategyId) : null,
             forced_signal: streamSignal,
-            message: streamMessage,
           },
         }),
       });
@@ -323,16 +320,6 @@ export default function SettingsPage({ adminUser }) {
               SELL
             </button>
           </div>
-        </div>
-
-        <div className="admin-field">
-          <label className="admin-label">Комментарий стрима (опционально)</label>
-          <input
-            className="admin-input"
-            value={streamMessage}
-            onChange={(e) => setStreamMessage(e.target.value)}
-            placeholder="Например: работаем только в SELL до конца сессии"
-          />
         </div>
 
         <div className="admin-row-actions">

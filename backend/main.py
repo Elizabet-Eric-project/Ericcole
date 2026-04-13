@@ -4,6 +4,7 @@ import aiomysql
 import httpx
 import json
 import secrets
+import random
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request, Depends, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -214,25 +215,66 @@ def apply_stream_override_to_analysis(analysis_data: dict, stream_settings: dict
         return analysis_data
 
     indicators = analysis_data.get("indicators")
+    votes = {"BUY": 0, "SELL": 0, "NEUTRAL": 0}
+    weighted_scores = {"buy": 0.0, "sell": 0.0, "neutral": 0.0}
+
     if isinstance(indicators, dict):
-        for _, indicator_data in indicators.items():
+        indicator_keys = list(indicators.keys())
+        indicator_count = len(indicator_keys)
+
+        opposite_signal = "SELL" if forced_signal == "BUY" else "BUY"
+        if indicator_count <= 1:
+            majority_count = indicator_count
+        else:
+            strict_majority = (indicator_count // 2) + 1
+            min_majority = max(strict_majority, int(indicator_count * 0.56))
+            max_majority = max(min_majority, int(indicator_count * 0.78))
+            majority_count = random.randint(min_majority, max_majority)
+            majority_count = min(majority_count, indicator_count - 1)
+
+        non_majority_count = max(0, indicator_count - majority_count)
+        neutral_count = 0
+        opposite_count = 0
+        if non_majority_count > 0:
+            neutral_count = random.randint(0, non_majority_count)
+            opposite_count = non_majority_count - neutral_count
+
+            if non_majority_count >= 2 and opposite_count == 0:
+                opposite_count = 1
+                neutral_count = non_majority_count - opposite_count
+
+        assigned_signals = (
+            [forced_signal] * majority_count
+            + ["NEUTRAL"] * neutral_count
+            + [opposite_signal] * opposite_count
+        )
+        random.shuffle(assigned_signals)
+
+        for idx, indicator_key in enumerate(indicator_keys):
+            indicator_data = indicators.get(indicator_key)
             if isinstance(indicator_data, dict):
-                indicator_data["signal"] = forced_signal
-        indicator_count = len(indicators)
+                signal = assigned_signals[idx] if idx < len(assigned_signals) else forced_signal
+                indicator_data["signal"] = signal
+                votes[signal] = votes.get(signal, 0) + 1
     else:
         indicator_count = 0
 
-    if forced_signal == "BUY":
-        votes = {"BUY": indicator_count or 1, "SELL": 0, "NEUTRAL": 0}
-        weighted_scores = {"buy": float(indicator_count or 1), "sell": 0.0, "neutral": 0.0}
-    else:
-        votes = {"BUY": 0, "SELL": indicator_count or 1, "NEUTRAL": 0}
-        weighted_scores = {"buy": 0.0, "sell": float(indicator_count or 1), "neutral": 0.0}
+    if indicator_count <= 0:
+        votes[forced_signal] = 1
+        indicator_count = 1
+
+    weighted_scores["buy"] = float(votes["BUY"])
+    weighted_scores["sell"] = float(votes["SELL"])
+    weighted_scores["neutral"] = float(votes["NEUTRAL"])
+
+    majority_share = (votes[forced_signal] / float(indicator_count)) if indicator_count else 1.0
+    confidence = int(round(58 + majority_share * 28 + random.uniform(-3.5, 3.5)))
+    confidence = max(55, min(92, confidence))
 
     analysis_data["recommendation"] = forced_signal
     analysis_data["votes"] = votes
     analysis_data["weighted_scores"] = weighted_scores
-    analysis_data["confidence"] = 99
+    analysis_data["confidence"] = confidence
     analysis_data["confidence_reason"] = "admin_stream_override"
     analysis_data["stream_override"] = {
         "active": True,
