@@ -7,10 +7,24 @@ import aiomysql
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 
 async def get_ai_settings(db_pool):
-    async with db_pool.acquire() as conn:
-        async with conn.cursor(aiomysql.DictCursor) as cur:
-            await cur.execute("SELECT system_prompt, model FROM ai_settings WHERE id = 1")
-            return await cur.fetchone()
+    default_settings = {
+        "system_prompt": "You are a helpful trading assistant.",
+        "model": "gpt-4o-mini",
+    }
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute("SELECT system_prompt, model FROM ai_settings WHERE id = 1")
+                row = await cur.fetchone()
+                if not row:
+                    return default_settings
+                return {
+                    "system_prompt": row.get("system_prompt") or default_settings["system_prompt"],
+                    "model": row.get("model") or default_settings["model"],
+                }
+    except Exception as e:
+        print(f"AI settings fallback due to DB error: {e}")
+        return default_settings
 
 async def call_openai(messages, model="gpt-4o-mini"):
     api_key = os.getenv("OPENAI_API_KEY")
@@ -64,7 +78,7 @@ async def process_user_message(db_pool, user_id: int, chat_id: int, text: str):
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
-                SELECT c.id, c.title, c.message_count, c.context_summary 
+                SELECT c.id, c.title
                 FROM ai_chats c
                 WHERE c.id = %s AND c.user_id = %s
             """, (chat_id, user_id))
@@ -74,10 +88,9 @@ async def process_user_message(db_pool, user_id: int, chat_id: int, text: str):
                 return {"error": "Chat not found"}
 
             await cur.execute("INSERT INTO ai_messages (chat_id, role, content) VALUES (%s, 'user', %s)", (chat_id, text))
-            new_msg_count = chat['message_count'] + 1
-            await cur.execute("UPDATE ai_chats SET message_count = %s, updated_at = NOW() WHERE id = %s", (new_msg_count, chat_id))
+            await cur.execute("UPDATE ai_chats SET updated_at = NOW() WHERE id = %s", (chat_id,))
             
-            if new_msg_count == 1 or chat['title'] in ['New Chat']:
+            if (chat.get('title') or '').strip() in ['', 'New Chat']:
                 asyncio.create_task(generate_title_task(db_pool, chat_id, user_id, [{"role": "user", "content": text}]))
 
     settings = await get_ai_settings(db_pool)
@@ -95,9 +108,6 @@ async def process_user_message(db_pool, user_id: int, chat_id: int, text: str):
 
     messages_payload = [{"role": "system", "content": system_prompt}]
     
-    if chat['context_summary']:
-        messages_payload.append({"role": "system", "content": f"Summary of previous context: {chat['context_summary']}"})
-        
     for msg in recent_messages:
         messages_payload.append({"role": msg['role'], "content": msg['content']})
 
@@ -106,6 +116,6 @@ async def process_user_message(db_pool, user_id: int, chat_id: int, text: str):
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("INSERT INTO ai_messages (chat_id, role, content) VALUES (%s, 'assistant', %s)", (chat_id, ai_response))
-            await cur.execute("UPDATE ai_chats SET message_count = message_count + 1 WHERE id = %s", (chat_id,))
+            await cur.execute("UPDATE ai_chats SET updated_at = NOW() WHERE id = %s", (chat_id,))
 
     return {"status": "success", "response": ai_response}

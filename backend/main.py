@@ -661,7 +661,7 @@ async def get_or_create_active_chat_for_user(user_id: int):
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
-                SELECT id, title, message_count 
+                SELECT id, title
                 FROM ai_chats 
                 WHERE user_id = %s AND status = 'active' 
                 AND updated_at >= NOW() - INTERVAL 24 HOUR
