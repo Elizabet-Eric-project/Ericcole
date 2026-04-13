@@ -44,6 +44,7 @@ def get_env_int(name: str, default: int) -> int:
 
 API_HOST = (os.getenv("API_HOST") or "0.0.0.0").strip() or "0.0.0.0"
 API_PORT = get_env_int("API_PORT", 8000)
+ALLOWED_STRATEGY_TIMEFRAMES = ("1m", "3m", "5m", "10m", "15m", "30m", "1h", "4h", "1d")
 
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
@@ -285,6 +286,22 @@ async def get_user_strategy_id(user_id: int) -> Optional[int]:
         return int(row.get("strategy_id")) if row.get("strategy_id") is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def normalize_allowed_timeframes(raw_value) -> str:
+    if isinstance(raw_value, list):
+        candidates = [str(item or "").strip() for item in raw_value]
+    else:
+        candidates = [part.strip() for part in str(raw_value or "").split(",")]
+    seen = set()
+    normalized = []
+    for timeframe in candidates:
+        if timeframe in ALLOWED_STRATEGY_TIMEFRAMES and timeframe not in seen:
+            seen.add(timeframe)
+            normalized.append(timeframe)
+    if not normalized:
+        normalized = ["5m", "15m", "30m", "1h", "4h", "1d"]
+    return ",".join(normalized)
 
 
 def ensure_analysis_key_levels(analysis_data: dict, preferred_signal: Optional[str] = None) -> dict:
@@ -1110,7 +1127,7 @@ async def admin_strategies(admin=Depends(get_admin_user)):
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute(
                 """
-                SELECT p.id, p.name, p.icon, p.is_system, p.allowed_timeframes,
+                SELECT p.id, p.name, p.icon, p.is_system, p.allowed_timeframes, p.public_winrate,
                        (
                            SELECT GROUP_CONCAT(i.name ORDER BY i.name SEPARATOR ', ')
                            FROM preset_indicators pi
@@ -1158,6 +1175,11 @@ async def admin_strategies(admin=Depends(get_admin_user)):
         wins_count = int(row.get("wins_count") or 0)
         closed_signals = int(row.get("closed_signals") or 0)
         winrate = 0.0 if closed_signals <= 0 else round((wins_count / closed_signals) * 100, 2)
+        raw_public_winrate = row.get("public_winrate")
+        try:
+            public_winrate = float(raw_public_winrate) if raw_public_winrate is not None else None
+        except (TypeError, ValueError):
+            public_winrate = None
 
         row["users_count"] = users_count
         row["usage_count"] = users_count
@@ -1165,6 +1187,7 @@ async def admin_strategies(admin=Depends(get_admin_user)):
         row["wins_count"] = wins_count
         row["closed_signals"] = closed_signals
         row["winrate"] = winrate
+        row["public_winrate"] = public_winrate
         normalized_rows.append(row)
 
     system_count = sum(1 for row in normalized_rows if int(row.get("is_system") or 0) == 1)
@@ -1191,11 +1214,21 @@ async def admin_strategies_update(request: Request, admin=Depends(get_admin_user
 
     name = (data.get("name") or "").strip()
     icon = (data.get("icon") or "⚡").strip()[:32]
-    allowed_timeframes = (data.get("allowed_timeframes") or "").strip()
+    allowed_timeframes = normalize_allowed_timeframes(data.get("allowed_timeframes"))
     is_system = 1 if bool(data.get("is_system")) else 0
     indicators = data.get("indicators")
+    raw_public_winrate = data.get("public_winrate")
     if not name:
         raise HTTPException(status_code=400, detail="Strategy name is required")
+    if raw_public_winrate is None or (isinstance(raw_public_winrate, str) and not raw_public_winrate.strip()):
+        public_winrate = None
+    else:
+        try:
+            public_winrate = round(float(raw_public_winrate), 2)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="public_winrate must be a number")
+        if public_winrate < 0 or public_winrate > 100:
+            raise HTTPException(status_code=400, detail="public_winrate must be between 0 and 100")
 
     indicator_ids = []
     if isinstance(indicators, list):
@@ -1229,10 +1262,11 @@ async def admin_strategies_update(request: Request, admin=Depends(get_admin_user
                 SET name = %s,
                     icon = %s,
                     allowed_timeframes = %s,
+                    public_winrate = %s,
                     is_system = %s
                 WHERE id = %s
                 """,
-                (name, icon, allowed_timeframes, is_system, strategy_id),
+                (name, icon, allowed_timeframes, public_winrate, is_system, strategy_id),
             )
 
             if isinstance(indicators, list):
@@ -1449,7 +1483,7 @@ async def get_strategies(user=Depends(get_telegram_user)):
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
-                SELECT p.id, p.name, p.is_system, p.icon, p.allowed_timeframes,
+                SELECT p.id, p.name, p.is_system, p.icon, p.allowed_timeframes, p.public_winrate,
                        GROUP_CONCAT(i.name SEPARATOR ', ') as indicators_list,
                        GROUP_CONCAT(i.id SEPARATOR ',') as indicator_ids,
                        GROUP_CONCAT(i.key SEPARATOR ',') as indicator_keys

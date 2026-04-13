@@ -384,6 +384,12 @@
   color: #7b5421;
 }
 
+.admin-chip.admin-chip-timeframe {
+  border-color: rgba(143, 106, 46, 0.3);
+  background: rgba(143, 106, 46, 0.12);
+  color: #7f5720;
+}
+
 .admin-settings-menu-grid {
   margin-top: 12px;
   display: grid;

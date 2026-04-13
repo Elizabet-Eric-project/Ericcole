@@ -29,6 +29,29 @@ const formatPercent = (value) => {
   return `${num.toFixed(1)}%`;
 };
 
+const TIMEFRAME_OPTIONS = ['1m', '3m', '5m', '10m', '15m', '30m', '1h', '4h', '1d'];
+
+const parseTimeframes = (value) => {
+  const raw = Array.isArray(value) ? value : String(value || '').split(',');
+  const seen = new Set();
+  const result = [];
+  raw.forEach((item) => {
+    const timeframe = String(item || '').trim();
+    if (!TIMEFRAME_OPTIONS.includes(timeframe) || seen.has(timeframe)) return;
+    seen.add(timeframe);
+    result.push(timeframe);
+  });
+  return result;
+};
+
+const joinTimeframes = (value) => parseTimeframes(value).join(',');
+
+const parsePublicWinrate = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 export default function StrategiesPage() {
   const [items, setItems] = useState([]);
   const [indicators, setIndicators] = useState([]);
@@ -53,6 +76,7 @@ export default function StrategiesPage() {
         wins_count: toInt(item.wins_count),
         closed_signals: toInt(item.closed_signals),
         winrate: Number(item.winrate || 0),
+        public_winrate: parsePublicWinrate(item.public_winrate),
       }));
       setItems(normalized);
       setIndicators(Array.isArray(res.indicators) ? res.indicators : []);
@@ -100,13 +124,14 @@ export default function StrategiesPage() {
     setForm({
       id: selected.id,
       name: selected.name || '',
-      icon: selected.icon || '📌',
-      allowed_timeframes: selected.allowed_timeframes || '',
+      icon: selected.icon || '⚡',
+      timeframes: parseTimeframes(selected.allowed_timeframes),
       is_system: isSystemStrategy(selected),
       initial_is_system: isSystemStrategy(selected),
       users_count: toInt(selected.users_count),
       signals_count: toInt(selected.signals_count),
       winrate: Number(selected.winrate || 0),
+      public_winrate: selected.public_winrate === null ? '' : String(selected.public_winrate),
       indicators: uniqueIndicatorIds,
     });
   }, [selected]);
@@ -125,6 +150,7 @@ export default function StrategiesPage() {
     () => items.filter((item) => isSystemStrategy(item)),
     [items]
   );
+
   const userStrategies = useMemo(
     () => items.filter((item) => !isSystemStrategy(item)),
     [items]
@@ -154,10 +180,32 @@ export default function StrategiesPage() {
     });
   };
 
+  const toggleTimeframe = (timeframe) => {
+    setForm((prev) => {
+      if (!prev) return prev;
+      const exists = prev.timeframes.includes(timeframe);
+      const next = exists ? prev.timeframes.filter((item) => item !== timeframe) : [...prev.timeframes, timeframe];
+      return {
+        ...prev,
+        timeframes: parseTimeframes(next),
+      };
+    });
+  };
+
   const save = async () => {
     if (!form) return;
     if (!form.name.trim()) {
       setError('Название стратегии обязательно');
+      return;
+    }
+    if (!form.timeframes.length) {
+      setError('Выберите хотя бы один таймфрейм');
+      return;
+    }
+
+    const publicWinrate = form.public_winrate === '' ? null : Number(form.public_winrate);
+    if (publicWinrate !== null && (!Number.isFinite(publicWinrate) || publicWinrate < 0 || publicWinrate > 100)) {
+      setError('Отображаемый winrate должен быть числом от 0 до 100');
       return;
     }
 
@@ -170,7 +218,8 @@ export default function StrategiesPage() {
           id: form.id,
           name: form.name,
           icon: form.icon,
-          allowed_timeframes: form.allowed_timeframes || '',
+          allowed_timeframes: joinTimeframes(form.timeframes),
+          public_winrate: publicWinrate,
           is_system: form.initial_is_system ? form.is_system : false,
           indicators: form.indicators,
         }),
@@ -210,9 +259,10 @@ export default function StrategiesPage() {
         <div className="admin-entity-list">
           {rows.map((item) => {
             const indicatorNames = parseIndicatorNames(item);
+            const timeframes = parseTimeframes(item.allowed_timeframes);
             const usersCount = toInt(item.users_count);
             const signalsCount = toInt(item.signals_count);
-            const winrate = formatPercent(item.winrate);
+            const shownWinrate = item.public_winrate ?? item.winrate;
             return (
               <button
                 key={item.id}
@@ -222,27 +272,30 @@ export default function StrategiesPage() {
               >
                 <div className="admin-entity-head">
                   <div className="admin-entity-title">
-                    <span className="admin-state-icon">{item.icon || '📌'}</span>
+                    <span className="admin-state-icon">{item.icon || '📊'}</span>
                     <span>{item.name || `Стратегия ${item.id}`}</span>
                   </div>
                   <span className="admin-entity-gear">⚙️</span>
                 </div>
 
-                <div className="admin-entity-meta">
-                  ID: {item.id} | Таймфреймы: {item.allowed_timeframes || '-'}
-                </div>
+                <div className="admin-entity-meta">ID: {item.id}</div>
 
                 <div className="admin-strategy-meta-line">
                   <span>👥 Пользователи: {usersCount}</span>
                   <span>📶 Сигналы: {signalsCount}</span>
-                  <span>🎯 Winrate: {winrate}</span>
+                  <span>🎯 Отображаемый Winrate: {formatPercent(shownWinrate)}</span>
                 </div>
 
                 <div className="admin-chip-list">
-                  {(isSystemStrategy(item) ? (
+                  {isSystemStrategy(item) ? (
                     <span className="admin-chip admin-chip-state">Системная</span>
                   ) : (
                     <span className="admin-chip admin-chip-state user">Пользовательская</span>
+                  )}
+                  {timeframes.map((timeframe) => (
+                    <span key={`${item.id}-tf-${timeframe}`} className="admin-chip admin-chip-timeframe">
+                      {timeframe}
+                    </span>
                   ))}
                   {indicatorNames.map((indicator) => (
                     <span key={`${item.id}-${indicator}`} className="admin-chip">
@@ -262,6 +315,7 @@ export default function StrategiesPage() {
 
   if (selected && form) {
     const selectedIndicatorNames = form.indicators.map((id) => indicatorNameById.get(id) || `ID ${id}`);
+    const shownWinrate = form.public_winrate === '' ? form.winrate : Number(form.public_winrate);
 
     return (
       <div className="admin-card">
@@ -285,8 +339,8 @@ export default function StrategiesPage() {
             <div className="admin-metric-value small">{form.signals_count}</div>
           </div>
           <div className="admin-strategy-mini-card">
-            <div className="admin-metric-label">Winrate</div>
-            <div className="admin-metric-value small">{formatPercent(form.winrate)}</div>
+            <div className="admin-metric-label">Отображаемый Winrate</div>
+            <div className="admin-metric-value small">{formatPercent(shownWinrate)}</div>
           </div>
         </div>
 
@@ -310,11 +364,37 @@ export default function StrategiesPage() {
 
         <div className="admin-field">
           <label className="admin-label">Таймфреймы</label>
+          <div className="admin-indicator-grid">
+            {TIMEFRAME_OPTIONS.map((timeframe) => {
+              const isSelected = form.timeframes.includes(timeframe);
+              return (
+                <button
+                  key={timeframe}
+                  type="button"
+                  className={`admin-indicator-toggle ${isSelected ? 'selected' : ''}`}
+                  onClick={() => toggleTimeframe(timeframe)}
+                >
+                  {timeframe}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="admin-field">
+          <label className="admin-label">Отображаемый Winrate (%)</label>
           <input
             className="admin-input"
-            value={form.allowed_timeframes}
-            onChange={(e) => setForm((prev) => ({ ...prev, allowed_timeframes: e.target.value }))}
+            type="number"
+            min="0"
+            max="100"
+            step="0.1"
+            value={form.public_winrate}
+            onChange={(e) => setForm((prev) => ({ ...prev, public_winrate: e.target.value }))}
+            placeholder="Например: 62.5"
           />
+          <div className="admin-note">Это публичное значение winrate, которое показывается пользователям во фронте.</div>
+          <div className="admin-note">Текущий расчетный winrate по истории: {formatPercent(form.winrate)}.</div>
         </div>
 
         <div className="admin-row-between">
@@ -334,7 +414,7 @@ export default function StrategiesPage() {
         </div>
 
         <div className="admin-field">
-          <label className="admin-label">Выбранные индикаторы ({form.indicators.length})</label>
+          <label className="admin-label">Подключенные индикаторы ({form.indicators.length})</label>
           <div className="admin-chip-list">
             {selectedIndicatorNames.length ? (
               selectedIndicatorNames.map((indicator) => (

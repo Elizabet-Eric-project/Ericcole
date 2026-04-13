@@ -82,6 +82,7 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     is_system TINYINT(1) NOT NULL DEFAULT 0,
                     icon VARCHAR(64) NULL DEFAULT '⚡',
                     allowed_timeframes VARCHAR(255) NULL DEFAULT '5m,15m,30m,1h,4h,1d',
+                    public_winrate DECIMAL(6,2) NULL DEFAULT NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
@@ -228,6 +229,13 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
             "presets",
             "allowed_timeframes",
             "ALTER TABLE presets ADD COLUMN allowed_timeframes VARCHAR(255) NULL DEFAULT '5m,15m,30m,1h,4h,1d'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "presets",
+            "public_winrate",
+            "ALTER TABLE presets ADD COLUMN public_winrate DECIMAL(6,2) NULL DEFAULT NULL",
         )
 
         await _ensure_column(conn, db_name, "user_analyses", "news_data", "ALTER TABLE user_analyses ADD COLUMN news_data LONGTEXT NULL")
