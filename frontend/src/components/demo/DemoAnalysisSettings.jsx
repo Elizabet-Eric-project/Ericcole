@@ -291,11 +291,11 @@ export default function DemoAnalysisSettings({
               </div>
             ) : newsStatus.isWarning ? (
               <div className="nf-caution-box" style={{ marginBottom: '10px' }}>
-                <div className="nf-caution-title">вљ пёЏ {t.cautionTrade}</div>
+                <div className="nf-caution-title">{'\u26A0\uFE0F'} {t.cautionTrade}</div>
                 <div className="nf-events-list" style={{ marginTop: '10px' }}>
                   {newsStatus.warningEvents.slice(0, 3).map((ev, i) => (
                     <div key={i} className="nf-event-item impact-high">
-                      рџ”ґ {ev.time ? ev.time.split(' ')[1]?.substring(0, 5) : ''} {ev.currency} - {ev.event}
+                      {'\uD83D\uDD34'} {ev.time ? ev.time.split(' ')[1]?.substring(0, 5) : ''} {ev.currency} - {ev.event}
                     </div>
                   ))}
                 </div>
@@ -305,7 +305,7 @@ export default function DemoAnalysisSettings({
               </div>
             ) : (
               <div className="nf-safe-box" style={{ marginBottom: '10px' }}>
-                вњ… {t.calmMarket}
+                {'\u2705'} {t.calmMarket}
                 <button className="add-strategy-outline-btn" style={{ marginTop: '10px', borderColor: 'var(--success)', color: 'var(--success)' }} onClick={() => setIsNewsModalOpen(true)}>
                   {t.showNewsBtn}
                 </button>
@@ -378,7 +378,7 @@ export default function DemoAnalysisSettings({
         <div className="step-container fade-in">
           <h3 className="settings-main-title">{t.selectExpiration}</h3>
           
-          <div className="exp-section-title">вњ…</div>
+          <div className="exp-section-title">{'\u2705'}</div>
           <div className="exp-grid">
             {recommendedExp.map((exp) => (
               <button 
@@ -393,7 +393,7 @@ export default function DemoAnalysisSettings({
 
           {unavailableExp.length > 0 && (
             <>
-              <div className="exp-section-title disabled-title">вќЊ</div>
+              <div className="exp-section-title disabled-title">{'\u274C'}</div>
               <div className="exp-grid disabled-grid">
                 {unavailableExp.map((exp) => (
                   <button 
@@ -421,7 +421,7 @@ export default function DemoAnalysisSettings({
                 onClick={() => { if (onUpdateStrategy) onUpdateStrategy(strat.id); setEditMode(null); }} 
                 style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
               >
-                <span style={{ fontSize: '1.2rem' }}>{strat.icon || 'вљЎ'}</span>
+                <span style={{ fontSize: '1.2rem' }}>{strat.icon || '\u26A1'}</span>
                 <span>{strat.name}</span>
               </button>
             ))}
@@ -455,7 +455,7 @@ export default function DemoAnalysisSettings({
               <div className="summary-info">
                 <span className="summary-label">{t.strategyLabel}</span>
                 <span className="summary-value" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '1.1em' }}>{selectedStrategy.icon || 'вљЎ'}</span>
+                  <span style={{ fontSize: '1.1em' }}>{selectedStrategy.icon || '\u26A1'}</span>
                   {selectedStrategy.name || 'System Strategy'}
                 </span>
               </div>

@@ -382,7 +382,7 @@ export default function ForexAnalysisSettings({
           <div className="analysis-strategy-row">
             {t.strategyLabel}: 
             <span className="analysis-strategy-value">
-              <span style={{ fontSize: '1.1em' }}>{safeRender(selectedStrategy.icon, 'вљЎ')}</span> 
+              <span style={{ fontSize: '1.1em' }}>{safeRender(selectedStrategy.icon, '\u26A1')}</span> 
               {safeRender(selectedStrategy.name || analysisData.strategy_name || 'Custom Strategy')}
             </span>
           </div>
@@ -429,11 +429,11 @@ export default function ForexAnalysisSettings({
               <div className="nf-safe-box" style={{ marginBottom: '10px' }}>{t.noNewsExpected}</div>
             ) : newsStatus.isWarning ? (
               <div className="nf-caution-box" style={{ marginBottom: '10px' }}>
-                <div className="nf-caution-title">вљ пёЏ {t.cautionTrade}</div>
+                <div className="nf-caution-title">{'\u26A0\uFE0F'} {t.cautionTrade}</div>
                 <div className="nf-events-list" style={{ marginTop: '10px' }}>
                   {newsStatus.warningEvents.slice(0, 3).map((ev, i) => (
                     <div key={i} className="nf-event-item impact-high">
-                      рџ”ґ {ev.time ? ev.time.split(' ')[1]?.substring(0, 5) : ''} {safeRender(ev.currency)} - {safeRender(ev.event)}
+                      {'\uD83D\uDD34'} {ev.time ? ev.time.split(' ')[1]?.substring(0, 5) : ''} {safeRender(ev.currency)} - {safeRender(ev.event)}
                     </div>
                   ))}
                 </div>
@@ -441,7 +441,7 @@ export default function ForexAnalysisSettings({
               </div>
             ) : (
               <div className="nf-safe-box" style={{ marginBottom: '10px' }}>
-                вњ… {t.calmMarket}
+                {'\u2705'} {t.calmMarket}
                 <button className="add-strategy-outline-btn" style={{ marginTop: '10px', borderColor: 'var(--success)', color: 'var(--success)' }} onClick={() => setIsNewsModalOpen(true)}>{t.showNewsBtn}</button>
               </div>
             )}
@@ -467,7 +467,7 @@ export default function ForexAnalysisSettings({
 
         <div className="action-buttons-grid">
           <button className="btn-success-mark" onClick={() => handleMarkStatus('success')}>{t.successBtn}</button>
-          <button className="btn-skip-mark" onClick={() => handleMarkStatus('skipped')}>{t.skipBtn || 'РџСЂРѕРїСѓСЃС‚РёС‚СЊ'}</button>
+          <button className="btn-skip-mark" onClick={() => handleMarkStatus('skipped')}>{t.skipBtn || 'Skip'}</button>
           <button className="btn-fail-mark" onClick={() => handleMarkStatus('fail')}>{t.failBtn}</button>
         </div>
 
@@ -530,7 +530,7 @@ export default function ForexAnalysisSettings({
       {isSelectingExp && (
         <div className="step-container fade-in">
           <h3 className="settings-main-title">{t.selectExpiration}</h3>
-          <div className="exp-section-title">вњ…</div>
+          <div className="exp-section-title">{'\u2705'}</div>
           <div className="exp-grid">
             {recommendedExp.map((exp) => (
               <button key={exp} className={`exp-item-btn ${forexParams.exp === exp ? 'active' : ''}`} onClick={() => { setForexParams({ ...forexParams, exp }); setEditMode(null); }}>
@@ -541,7 +541,7 @@ export default function ForexAnalysisSettings({
 
           {unavailableExp.length > 0 && (
             <>
-              <div className="exp-section-title">вќЊ</div>
+              <div className="exp-section-title">{'\u274C'}</div>
               <div className="exp-grid">
                 {unavailableExp.map((exp) => (
                   <button key={exp} className={`exp-item-btn ${forexParams.exp === exp ? 'active' : ''}`} onClick={() => { setForexParams({ ...forexParams, exp }); setEditMode(null); }}>
@@ -560,7 +560,7 @@ export default function ForexAnalysisSettings({
           <div className="strategies-grid">
             {strategies.map((strat) => (
               <button key={strat.id} className={`strategy-item-btn ${Number(user.strategy_id) === Number(strat.id) ? 'active' : ''}`} onClick={() => { onUpdateStrategy(strat.id); setEditMode(null); }}>
-                <span style={{ fontSize: '1.2rem' }}>{safeRender(strat.icon || 'вљЎ')}</span>
+                <span style={{ fontSize: '1.2rem' }}>{safeRender(strat.icon || '\u26A1')}</span>
                 <span>{safeRender(strat.name)}</span>
               </button>
             ))}
@@ -598,7 +598,7 @@ export default function ForexAnalysisSettings({
               <div className="summary-info">
                 <span className="summary-label">{t.strategyLabel}</span>
                 <span className="summary-value" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '1.1em' }}>{safeRender(selectedStrategy.icon, 'вљЎ')}</span>
+                  <span style={{ fontSize: '1.1em' }}>{safeRender(selectedStrategy.icon, '\u26A1')}</span>
                   {safeRender(selectedStrategy.name || '...')}
                 </span>
               </div>

@@ -155,7 +155,7 @@ export default function BinarySignalSettings({
               <div className="summary-info">
                 <span className="summary-label">{globalT.analysisSettings?.strategyLabel || 'Strategy'}</span>
                 <span className="summary-value" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '1.1em' }}>{selectedStrategy?.icon || 'вљЎ'}</span>
+                  <span style={{ fontSize: '1.1em' }}>{selectedStrategy?.icon || '\u26A1'}</span>
                   {selectedStrategy?.name || 'System Strategy'}
                 </span>
               </div>
