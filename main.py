@@ -4,7 +4,7 @@ import aiomysql
 import httpx
 import json
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
@@ -15,6 +15,10 @@ import ai_service
 from pydantic import BaseModel
 from typing import Optional
 from analysis_engine import compute_analysis_decision
+try:
+    from backend.telegram_auth import get_telegram_user
+except ModuleNotFoundError:
+    from telegram_auth import get_telegram_user
 
 load_dotenv()
 
@@ -638,12 +642,11 @@ async def cmd_start(message: types.Message):
     )
 
 class AIChatRequest(BaseModel):
-    user_id: int
+    user_id: Optional[int] = None
     text: Optional[str] = None
     chat_id: Optional[int] = None
 
-@app.post("/api/ai/chat/active")
-async def get_or_create_active_chat(request: AIChatRequest):
+async def get_or_create_active_chat_for_user(user_id: int):
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
@@ -652,12 +655,12 @@ async def get_or_create_active_chat(request: AIChatRequest):
                 WHERE user_id = %s AND status = 'active' 
                 AND updated_at >= NOW() - INTERVAL 24 HOUR
                 ORDER BY updated_at DESC LIMIT 1
-            """, (request.user_id,))
+            """, (user_id,))
             chat = await cur.fetchone()
 
             if not chat:
-                await cur.execute("UPDATE ai_chats SET status = 'archived' WHERE user_id = %s AND status = 'active'", (request.user_id,))
-                await cur.execute("INSERT INTO ai_chats (user_id) VALUES (%s)", (request.user_id,))
+                await cur.execute("UPDATE ai_chats SET status = 'archived' WHERE user_id = %s AND status = 'active'", (user_id,))
+                await cur.execute("INSERT INTO ai_chats (user_id) VALUES (%s)", (user_id,))
                 chat_id = cur.lastrowid
                 return {"status": "success", "chat_id": chat_id, "title": "РќРѕРІС‹Р№ РґРёР°Р»РѕРі", "messages": []}
 
@@ -666,15 +669,22 @@ async def get_or_create_active_chat(request: AIChatRequest):
             
             return {"status": "success", "chat_id": chat['id'], "title": chat['title'], "messages": messages}
 
+@app.post("/api/ai/chat/active")
+async def get_or_create_active_chat(request: AIChatRequest, user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
+    return await get_or_create_active_chat_for_user(user_id)
+
 @app.post("/api/ai/chat/send")
-async def send_chat_message(request: AIChatRequest):
+async def send_chat_message(request: AIChatRequest, user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     if not request.text or not request.chat_id:
         return {"error": "РќРµРѕР±С…РѕРґРёРј text Рё chat_id"}
-    result = await ai_service.process_user_message(db_pool, request.user_id, request.chat_id, request.text)
+    result = await ai_service.process_user_message(db_pool, user_id, request.chat_id, request.text)
     return result
 
 @app.post("/api/ai/chat/history")
-async def get_chat_history(request: AIChatRequest):
+async def get_chat_history(request: AIChatRequest, user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
@@ -683,26 +693,28 @@ async def get_chat_history(request: AIChatRequest):
                 WHERE user_id = %s 
                 ORDER BY updated_at DESC 
                 LIMIT 10
-            """, (request.user_id,))
+            """, (user_id,))
             chats = await cur.fetchall()
     return {"status": "success", "chats": chats}
 
 @app.post("/api/ai/chat/load")
-async def load_historical_chat(request: AIChatRequest):
+async def load_historical_chat(request: AIChatRequest, user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     if not request.chat_id:
         return {"error": "РќРµРѕР±С…РѕРґРёРј chat_id"}
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("UPDATE ai_chats SET status = 'archived' WHERE user_id = %s AND status = 'active'", (request.user_id,))
-            await cur.execute("UPDATE ai_chats SET status = 'active', updated_at = NOW() WHERE id = %s AND user_id = %s", (request.chat_id, request.user_id))
-    return await get_or_create_active_chat(request)
+            await cur.execute("UPDATE ai_chats SET status = 'archived' WHERE user_id = %s AND status = 'active'", (user_id,))
+            await cur.execute("UPDATE ai_chats SET status = 'active', updated_at = NOW() WHERE id = %s AND user_id = %s", (request.chat_id, user_id))
+    return await get_or_create_active_chat_for_user(user_id)
 
 @app.post("/api/ai/chat/new")
-async def create_new_chat(request: AIChatRequest):
+async def create_new_chat(request: AIChatRequest, user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("UPDATE ai_chats SET status = 'archived' WHERE user_id = %s AND status = 'active'", (request.user_id,))
-            await cur.execute("INSERT INTO ai_chats (user_id) VALUES (%s)", (request.user_id,))
+            await cur.execute("UPDATE ai_chats SET status = 'archived' WHERE user_id = %s AND status = 'active'", (user_id,))
+            await cur.execute("INSERT INTO ai_chats (user_id) VALUES (%s)", (user_id,))
             chat_id = cur.lastrowid
     return {"status": "success", "chat_id": chat_id, "title": "РќРѕРІС‹Р№ РґРёР°Р»РѕРі", "messages": []}
     
