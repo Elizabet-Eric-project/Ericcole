@@ -1,20 +1,38 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiAdminFetchJson } from '../../lib/api';
 
+const ACCESS_STORAGE_KEY = 'admin_system_access_enabled';
+
 export default function SettingsPage({ adminUser }) {
+  const [activeSection, setActiveSection] = useState('menu');
   const [model, setModel] = useState('gpt-4o-mini');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [admins, setAdmins] = useState([]);
   const [grantId, setGrantId] = useState('');
+
   const [streamEnabled, setStreamEnabled] = useState(false);
   const [streamScope, setStreamScope] = useState('all');
   const [streamStrategyId, setStreamStrategyId] = useState('');
   const [streamSignal, setStreamSignal] = useState('BUY');
   const [streamMessage, setStreamMessage] = useState('');
   const [streamStrategies, setStreamStrategies] = useState([]);
+
+  const [systemAccessEnabled, setSystemAccessEnabled] = useState(true);
+
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(ACCESS_STORAGE_KEY);
+      if (saved === '0') {
+        setSystemAccessEnabled(false);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const loadAll = useCallback(async () => {
     setError('');
@@ -49,7 +67,7 @@ export default function SettingsPage({ adminUser }) {
     loadAll();
   }, [loadAll]);
 
-  const saveSettings = async () => {
+  const saveSettings = async (source = 'all') => {
     if (streamEnabled && streamScope === 'strategy' && !streamStrategyId) {
       setError('Выберите стратегию для стрима');
       return;
@@ -58,6 +76,7 @@ export default function SettingsPage({ adminUser }) {
     setSaving(true);
     setError('');
     setStatus('');
+
     try {
       await apiAdminFetchJson('/api/admin/settings', {
         method: 'POST',
@@ -75,7 +94,14 @@ export default function SettingsPage({ adminUser }) {
           },
         }),
       });
-      setStatus('Настройки сохранены');
+
+      if (source === 'ai') {
+        setStatus('Настройки AI чата сохранены');
+      } else if (source === 'streams') {
+        setStatus('Настройки стримов сохранены');
+      } else {
+        setStatus('Настройки сохранены');
+      }
     } catch (e) {
       setError(e.message || 'Не удалось сохранить настройки');
     } finally {
@@ -117,14 +143,98 @@ export default function SettingsPage({ adminUser }) {
     }
   };
 
-  return (
-    <div className="admin-grid">
-      <div className="admin-card">
-        <h3 className="admin-section-title">AI настройки</h3>
+  const toggleSystemAccess = () => {
+    const next = !systemAccessEnabled;
+    setSystemAccessEnabled(next);
+    setError('');
+    setStatus(next ? 'Доступ к системе включен (frontend fallback)' : 'Доступ к системе выключен (frontend fallback)');
+    try {
+      window.localStorage.setItem(ACCESS_STORAGE_KEY, next ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  };
+
+  const cards = useMemo(
+    () => [
+      {
+        key: 'streams',
+        icon: '📡',
+        title: 'Стримы',
+        subtitle: streamEnabled ? 'Режим включен' : 'Режим выключен',
+      },
+      {
+        key: 'ai',
+        icon: '🤖',
+        title: 'AI чат',
+        subtitle: `Модель: ${model || '-'}`,
+      },
+      {
+        key: 'access',
+        icon: systemAccessEnabled ? '✅' : '⛔',
+        title: 'Доступ к системе',
+        subtitle: systemAccessEnabled ? 'Доступ открыт' : 'Доступ ограничен',
+      },
+      {
+        key: 'admins',
+        icon: '🛡️',
+        title: 'Выдать админку',
+        subtitle: `Текущих админов: ${admins.length}`,
+      },
+    ],
+    [admins.length, model, streamEnabled, systemAccessEnabled]
+  );
+
+  const goMenu = () => {
+    setActiveSection('menu');
+    setError('');
+    setStatus('');
+  };
+
+  if (activeSection === 'menu') {
+    return (
+      <div className="admin-page">
+        <div className="admin-card">
+          <h3 className="admin-section-title">Настройки</h3>
+          <div className="admin-muted">Откройте карточку нужного раздела</div>
+
+          <div className="admin-settings-menu-grid">
+            {cards.map((card) => (
+              <button
+                key={card.key}
+                type="button"
+                className="admin-settings-menu-card"
+                onClick={() => setActiveSection(card.key)}
+              >
+                <div className="admin-settings-menu-head">
+                  <span className="admin-settings-menu-icon">{card.icon}</span>
+                  <span className="admin-settings-menu-title">{card.title}</span>
+                </div>
+                <div className="admin-settings-menu-subtitle">{card.subtitle}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {error ? <div className="admin-error">{error}</div> : null}
+        {status ? <div className="admin-success">{status}</div> : null}
+      </div>
+    );
+  }
+
+  if (activeSection === 'ai') {
+    return (
+      <div className="admin-card admin-settings-detail">
+        <div className="admin-row-between">
+          <h3 className="admin-section-title">AI чат</h3>
+          <button className="admin-btn-outline" onClick={goMenu}>← К карточкам</button>
+        </div>
+
         <div className="admin-field">
           <label className="admin-label">Модель</label>
           <input className="admin-input" value={model} onChange={(e) => setModel(e.target.value)} />
         </div>
+
         <div className="admin-field">
           <label className="admin-label">Системный промпт</label>
           <textarea
@@ -134,10 +244,27 @@ export default function SettingsPage({ adminUser }) {
             onChange={(e) => setSystemPrompt(e.target.value)}
           />
         </div>
-      </div>
 
-      <div className="admin-card">
-        <h3 className="admin-section-title">Стримы</h3>
+        <div className="admin-row-actions">
+          <button className="admin-btn" onClick={() => saveSettings('ai')} disabled={saving}>
+            {saving ? 'Сохранение...' : 'Сохранить AI чат'}
+          </button>
+        </div>
+
+        {error ? <div className="admin-error">{error}</div> : null}
+        {status ? <div className="admin-success">{status}</div> : null}
+      </div>
+    );
+  }
+
+  if (activeSection === 'streams') {
+    return (
+      <div className="admin-card admin-settings-detail">
+        <div className="admin-row-between">
+          <h3 className="admin-section-title">Стримы</h3>
+          <button className="admin-btn-outline" onClick={goMenu}>← К карточкам</button>
+        </div>
+
         <div className="admin-field">
           <label className="admin-label">Режим</label>
           <label className="admin-muted">
@@ -146,7 +273,7 @@ export default function SettingsPage({ adminUser }) {
               checked={streamEnabled}
               onChange={(e) => setStreamEnabled(e.target.checked)}
             />{' '}
-            {streamEnabled ? 'Включен (анализ берет сигнал из настроек стрима)' : 'Выключен'}
+            {streamEnabled ? 'Включен (анализ берёт сигнал из настроек стрима)' : 'Выключен'}
           </label>
         </div>
 
@@ -204,51 +331,91 @@ export default function SettingsPage({ adminUser }) {
             className="admin-input"
             value={streamMessage}
             onChange={(e) => setStreamMessage(e.target.value)}
-            placeholder="Например: Работаем только в SELL до конца сессии"
+            placeholder="Например: работаем только в SELL до конца сессии"
           />
         </div>
-      </div>
 
-      <div className="admin-card">
-        <h3 className="admin-section-title">Выдать админку</h3>
-        <div className="admin-inline-form">
-          <input
-            className="admin-input"
-            inputMode="numeric"
-            placeholder="Введите user_id"
-            value={grantId}
-            onChange={(e) => setGrantId(e.target.value.replace(/\D/g, ''))}
-          />
-          <button className="admin-btn" onClick={grantAdmin}>Выдать</button>
+        <div className="admin-row-actions">
+          <button className="admin-btn" onClick={() => saveSettings('streams')} disabled={saving}>
+            {saving ? 'Сохранение...' : 'Сохранить стримы'}
+          </button>
         </div>
 
-        <h4 className="admin-subtitle">Текущие админы</h4>
-        <div className="admin-list">
-          {admins.map((item) => (
-            <div className="admin-list-row" key={item.user_id}>
-              <span>
-                {item.first_name || item.username || 'Админ'} | {item.user_id}
-              </span>
-              <button
-                className="admin-btn-outline"
-                disabled={Number(item.user_id) === Number(adminUser?.user_id)}
-                onClick={() => revokeAdmin(item.user_id)}
-              >
-                Забрать
-              </button>
-            </div>
-          ))}
-          {admins.length === 0 ? <div className="admin-muted">Список админов пуст</div> : null}
-        </div>
-      </div>
-
-      <div className="admin-card">
-        <button className="admin-btn" onClick={saveSettings} disabled={saving}>
-          {saving ? 'Сохранение...' : 'Сохранить все настройки'}
-        </button>
         {error ? <div className="admin-error">{error}</div> : null}
         {status ? <div className="admin-success">{status}</div> : null}
       </div>
+    );
+  }
+
+  if (activeSection === 'access') {
+    return (
+      <div className="admin-card admin-settings-detail">
+        <div className="admin-row-between">
+          <h3 className="admin-section-title">Доступ к системе</h3>
+          <button className="admin-btn-outline" onClick={goMenu}>← К карточкам</button>
+        </div>
+
+        <div className="admin-field">
+          <label className="admin-label">Режим доступа</label>
+          <label className="admin-muted">
+            <input
+              type="checkbox"
+              checked={systemAccessEnabled}
+              onChange={toggleSystemAccess}
+            />{' '}
+            {systemAccessEnabled ? 'Доступ открыт' : 'Доступ ограничен'}
+          </label>
+        </div>
+
+        <div className="admin-muted">
+          Сейчас это временный frontend fallback. Когда подключим backend и БД под доступ, логика автоматически переедет сюда.
+        </div>
+
+        {error ? <div className="admin-error">{error}</div> : null}
+        {status ? <div className="admin-success">{status}</div> : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="admin-card admin-settings-detail">
+      <div className="admin-row-between">
+        <h3 className="admin-section-title">Выдать админку</h3>
+        <button className="admin-btn-outline" onClick={goMenu}>← К карточкам</button>
+      </div>
+
+      <div className="admin-inline-form">
+        <input
+          className="admin-input"
+          inputMode="numeric"
+          placeholder="Введите user_id"
+          value={grantId}
+          onChange={(e) => setGrantId(e.target.value.replace(/\D/g, ''))}
+        />
+        <button className="admin-btn" onClick={grantAdmin}>Выдать</button>
+      </div>
+
+      <h4 className="admin-subtitle">Текущие админы</h4>
+      <div className="admin-list">
+        {admins.map((item) => (
+          <div className="admin-list-row" key={item.user_id}>
+            <span>
+              {item.first_name || item.username || 'Админ'} | {item.user_id}
+            </span>
+            <button
+              className="admin-btn-outline"
+              disabled={Number(item.user_id) === Number(adminUser?.user_id)}
+              onClick={() => revokeAdmin(item.user_id)}
+            >
+              Забрать
+            </button>
+          </div>
+        ))}
+        {admins.length === 0 ? <div className="admin-muted">Список админов пуст</div> : null}
+      </div>
+
+      {error ? <div className="admin-error">{error}</div> : null}
+      {status ? <div className="admin-success">{status}</div> : null}
     </div>
   );
 }
