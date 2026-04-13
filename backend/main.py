@@ -3,8 +3,9 @@ import asyncio
 import aiomysql
 import httpx
 import json
+import secrets
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi import FastAPI, Request, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
@@ -65,6 +66,14 @@ if not menu_photo_file_id and os.path.exists(menu_file_id_path):
             menu_photo_file_id = f.read().strip()
     except Exception:
         menu_photo_file_id = ""
+admin_panel_token = (os.getenv("ADMIN_PANEL_TOKEN") or "").strip()
+admin_token_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "media", "admin.token")
+if not admin_panel_token and os.path.exists(admin_token_file_path):
+    try:
+        with open(admin_token_file_path, "r", encoding="utf-8") as f:
+            admin_panel_token = f.read().strip()
+    except Exception:
+        admin_panel_token = ""
 
 analysis_queue = asyncio.Queue()
 processing_ids = set() 
@@ -90,6 +99,59 @@ def resolve_menu_photo_path() -> str:
             return path
     return candidates[0]
 
+
+def get_admin_panel_token() -> str:
+    global admin_panel_token
+    if admin_panel_token:
+        return admin_panel_token
+    admin_panel_token = secrets.token_urlsafe(32)
+    try:
+        os.makedirs(os.path.dirname(admin_token_file_path), exist_ok=True)
+        with open(admin_token_file_path, "w", encoding="utf-8") as f:
+            f.write(admin_panel_token)
+    except Exception:
+        pass
+    return admin_panel_token
+
+
+def build_admin_webapp_url() -> str:
+    base_url = ((os.getenv("WEB_APP_URL") or "").strip() or "").rstrip("/")
+    token = get_admin_panel_token()
+    if not base_url:
+        return f"/admin/{token}"
+    return f"{base_url}/admin/{token}"
+
+
+async def is_admin_user(user_id: int) -> bool:
+    if not db_pool:
+        return False
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT user_id
+                FROM admin_users
+                WHERE user_id = %s AND is_active = 1
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            row = await cur.fetchone()
+    return bool(row)
+
+
+async def get_admin_user(
+    user=Depends(get_telegram_user),
+    x_admin_token: str = Header(default="", alias="X-Admin-Token"),
+):
+    expected = get_admin_panel_token()
+    provided = (x_admin_token or "").strip()
+    if not provided or not secrets.compare_digest(provided, expected):
+        raise HTTPException(status_code=403, detail="Admin token is invalid")
+    if not await is_admin_user(int(user["user_id"])):
+        raise HTTPException(status_code=403, detail="Admin access denied")
+    return user
+
 @app.get("/api/support/links")
 async def get_support_links():
     channel_url = (os.getenv("CHANNEL_URL") or "").strip()
@@ -109,6 +171,350 @@ async def get_webapp_bot_info():
         except Exception:
             bot_username = ""
     return {"bot_username": bot_username}
+
+
+@app.get("/api/admin/me")
+async def admin_me(admin=Depends(get_admin_user)):
+    return {
+        "status": "success",
+        "user": {
+            "user_id": int(admin["user_id"]),
+            "username": admin.get("username") or "",
+            "first_name": admin.get("first_name") or "",
+        },
+    }
+
+
+@app.get("/api/admin/stats")
+async def admin_stats(admin=Depends(get_admin_user)):
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("SELECT COUNT(*) AS cnt FROM users")
+            users_total = int((await cur.fetchone() or {}).get("cnt") or 0)
+
+            await cur.execute("SELECT COUNT(*) AS cnt FROM admin_users WHERE is_active = 1")
+            admins_total = int((await cur.fetchone() or {}).get("cnt") or 0)
+
+            await cur.execute("SELECT COUNT(*) AS cnt FROM user_analyses WHERE status = 'active'")
+            active_analyses = int((await cur.fetchone() or {}).get("cnt") or 0)
+
+            await cur.execute("SELECT COUNT(*) AS cnt FROM ai_chats")
+            chats_total = int((await cur.fetchone() or {}).get("cnt") or 0)
+
+            await cur.execute(
+                """
+                SELECT mode, COUNT(*) AS cnt
+                FROM users
+                GROUP BY mode
+                """
+            )
+            modes_rows = await cur.fetchall()
+            mode_breakdown = {row["mode"]: int(row["cnt"]) for row in (modes_rows or [])}
+
+            await cur.execute(
+                """
+                SELECT DATE(created_at) AS d, COUNT(*) AS cnt
+                FROM users
+                WHERE created_at >= NOW() - INTERVAL 7 DAY
+                GROUP BY DATE(created_at)
+                ORDER BY d ASC
+                """
+            )
+            growth_rows = await cur.fetchall()
+            users_growth = [{"date": str(row["d"]), "count": int(row["cnt"])} for row in (growth_rows or [])]
+
+    return {
+        "status": "success",
+        "stats": {
+            "users_total": users_total,
+            "admins_total": admins_total,
+            "active_analyses": active_analyses,
+            "chats_total": chats_total,
+            "mode_breakdown": mode_breakdown,
+            "users_growth_7d": users_growth,
+        },
+    }
+
+
+@app.get("/api/admin/users")
+async def admin_users(limit: int = 50, offset: int = 0, search: str = "", admin=Depends(get_admin_user)):
+    limit = max(1, min(int(limit), 300))
+    offset = max(0, int(offset))
+    search = (search or "").strip()
+    like = f"%{search}%"
+
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT u.user_id, u.username, u.first_name, u.mode, u.lang, u.strategy_id, u.created_at,
+                       p.name AS strategy_name,
+                       CASE WHEN a.user_id IS NULL THEN 0 ELSE a.is_active END AS is_admin,
+                       a.granted_at
+                FROM users u
+                LEFT JOIN presets p ON p.id = u.strategy_id
+                LEFT JOIN admin_users a ON a.user_id = u.user_id
+                WHERE (%s = '' OR CAST(u.user_id AS CHAR) LIKE %s OR COALESCE(u.username, '') LIKE %s OR COALESCE(u.first_name, '') LIKE %s)
+                ORDER BY u.created_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                (search, like, like, like, limit, offset),
+            )
+            users_rows = await cur.fetchall()
+
+            await cur.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM users u
+                WHERE (%s = '' OR CAST(u.user_id AS CHAR) LIKE %s OR COALESCE(u.username, '') LIKE %s OR COALESCE(u.first_name, '') LIKE %s)
+                """,
+                (search, like, like, like),
+            )
+            total = int((await cur.fetchone() or {}).get("cnt") or 0)
+
+    return {"status": "success", "users": users_rows or [], "total": total, "limit": limit, "offset": offset}
+
+
+@app.get("/api/admin/admins")
+async def admin_admins(admin=Depends(get_admin_user)):
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT a.user_id, a.is_active, a.granted_at, a.granted_by,
+                       u.username, u.first_name
+                FROM admin_users a
+                LEFT JOIN users u ON u.user_id = a.user_id
+                WHERE a.is_active = 1
+                ORDER BY a.granted_at DESC
+                """
+            )
+            rows = await cur.fetchall()
+    return {"status": "success", "admins": rows or []}
+
+
+@app.post("/api/admin/admins/grant")
+async def admin_grant(request: Request, admin=Depends(get_admin_user)):
+    data = await request.json()
+    try:
+        target_user_id = int(data.get("user_id") or 0)
+    except (TypeError, ValueError):
+        target_user_id = 0
+    if not target_user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    granted_by = int(admin["user_id"])
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO admin_users (user_id, is_active, granted_by)
+                VALUES (%s, 1, %s)
+                ON DUPLICATE KEY UPDATE
+                    is_active = 1,
+                    granted_by = VALUES(granted_by),
+                    granted_at = CURRENT_TIMESTAMP
+                """,
+                (target_user_id, granted_by),
+            )
+    return {"status": "success", "user_id": target_user_id}
+
+
+@app.post("/api/admin/admins/revoke")
+async def admin_revoke(request: Request, admin=Depends(get_admin_user)):
+    data = await request.json()
+    try:
+        target_user_id = int(data.get("user_id") or 0)
+    except (TypeError, ValueError):
+        target_user_id = 0
+    if not target_user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    current_admin_id = int(admin["user_id"])
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT user_id
+                FROM admin_users
+                WHERE user_id = %s AND is_active = 1
+                LIMIT 1
+                """,
+                (target_user_id,),
+            )
+            existing_admin = await cur.fetchone()
+            if not existing_admin:
+                raise HTTPException(status_code=404, detail="Admin not found")
+
+            await cur.execute("SELECT COUNT(*) AS cnt FROM admin_users WHERE is_active = 1")
+            active_count = int((await cur.fetchone() or {}).get("cnt") or 0)
+            if target_user_id == current_admin_id and active_count <= 1:
+                raise HTTPException(status_code=400, detail="Cannot revoke the last active admin")
+
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE admin_users
+                SET is_active = 0
+                WHERE user_id = %s
+                """,
+                (target_user_id,),
+            )
+    return {"status": "success", "user_id": target_user_id}
+
+
+@app.post("/api/admin/broadcast")
+async def admin_broadcast(request: Request, admin=Depends(get_admin_user)):
+    data = await request.json()
+    text = (data.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Broadcast text is required")
+
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("SELECT user_id FROM users ORDER BY user_id ASC")
+            users_rows = await cur.fetchall()
+
+    sent = 0
+    failed = 0
+    failed_samples = []
+    for row in users_rows or []:
+        uid = int(row["user_id"])
+        try:
+            await bot.send_message(uid, text, disable_web_page_preview=True)
+            sent += 1
+            await asyncio.sleep(0.035)
+        except Exception as e:
+            failed += 1
+            if len(failed_samples) < 20:
+                failed_samples.append({"user_id": uid, "error": str(e)})
+
+    return {
+        "status": "success",
+        "result": {
+            "total": len(users_rows or []),
+            "sent": sent,
+            "failed": failed,
+            "failed_samples": failed_samples,
+        },
+    }
+
+
+@app.get("/api/admin/settings")
+async def admin_settings(admin=Depends(get_admin_user)):
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("SELECT id, system_prompt, model, updated_at FROM ai_settings WHERE id = 1")
+            ai_settings = await cur.fetchone()
+    if not ai_settings:
+        ai_settings = {"id": 1, "system_prompt": "You are a helpful trading assistant.", "model": "gpt-4o-mini", "updated_at": None}
+    return {
+        "status": "success",
+        "settings": {
+            "ai": ai_settings,
+            "support": {
+                "channel_url": (os.getenv("CHANNEL_URL") or "").strip(),
+                "support_url": (os.getenv("SUPPORT_URL") or "").strip(),
+            },
+        },
+    }
+
+
+@app.post("/api/admin/settings")
+async def admin_settings_update(request: Request, admin=Depends(get_admin_user)):
+    data = await request.json()
+    ai_data = data.get("ai") or {}
+    system_prompt = (ai_data.get("system_prompt") or "").strip()
+    model = (ai_data.get("model") or "").strip()
+
+    if not system_prompt:
+        raise HTTPException(status_code=400, detail="system_prompt is required")
+    if not model:
+        raise HTTPException(status_code=400, detail="model is required")
+
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ai_settings (id, system_prompt, model)
+                VALUES (1, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    system_prompt = VALUES(system_prompt),
+                    model = VALUES(model)
+                """,
+                (system_prompt, model),
+            )
+    return {"status": "success"}
+
+
+@app.get("/api/admin/strategies")
+async def admin_strategies(admin=Depends(get_admin_user)):
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT p.id, p.name, p.icon, p.is_system, p.allowed_timeframes,
+                       GROUP_CONCAT(i.name SEPARATOR ', ') AS indicators_list,
+                       GROUP_CONCAT(i.id SEPARATOR ',') AS indicator_ids,
+                       COUNT(DISTINCT up.user_id) AS usage_count
+                FROM presets p
+                LEFT JOIN preset_indicators pi ON p.id = pi.preset_id
+                LEFT JOIN indicators i ON pi.indicator_id = i.id
+                LEFT JOIN user_presets up ON p.id = up.preset_id
+                GROUP BY p.id
+                ORDER BY p.is_system DESC, p.id ASC
+                """
+            )
+            rows = await cur.fetchall()
+    return {"status": "success", "strategies": rows or []}
+
+
+@app.post("/api/admin/strategies/update")
+async def admin_strategies_update(request: Request, admin=Depends(get_admin_user)):
+    data = await request.json()
+    strategy_id = int(data.get("id") or 0)
+    if not strategy_id:
+        raise HTTPException(status_code=400, detail="Strategy id is required")
+
+    name = (data.get("name") or "").strip()
+    icon = (data.get("icon") or "⚡").strip()[:32]
+    allowed_timeframes = (data.get("allowed_timeframes") or "").strip()
+    is_system = 1 if bool(data.get("is_system")) else 0
+    if not name:
+        raise HTTPException(status_code=400, detail="Strategy name is required")
+
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE presets
+                SET name = %s,
+                    icon = %s,
+                    allowed_timeframes = %s,
+                    is_system = %s
+                WHERE id = %s
+                """,
+                (name, icon, allowed_timeframes, is_system, strategy_id),
+            )
+    return {"status": "success"}
+
+
+@app.post("/api/admin/strategies/delete")
+async def admin_strategies_delete(request: Request, admin=Depends(get_admin_user)):
+    data = await request.json()
+    strategy_id = int(data.get("id") or 0)
+    if not strategy_id:
+        raise HTTPException(status_code=400, detail="Strategy id is required")
+    if strategy_id == 1:
+        raise HTTPException(status_code=400, detail="Default strategy cannot be deleted")
+
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM preset_indicators WHERE preset_id = %s", (strategy_id,))
+            await cur.execute("DELETE FROM user_presets WHERE preset_id = %s", (strategy_id,))
+            await cur.execute("DELETE FROM presets WHERE id = %s", (strategy_id,))
+            await cur.execute("UPDATE users SET strategy_id = 1 WHERE strategy_id = %s", (strategy_id,))
+    return {"status": "success"}
 
 def parse_timeframe_mins(tf: str) -> int:
     if not tf: return 5
@@ -655,6 +1061,7 @@ async def update_analysis_status(request: Request, user=Depends(get_telegram_use
 async def cmd_start(message: types.Message):
     global menu_photo_file_id
     user_name = message.from_user.first_name or message.from_user.username or "Trader"
+    user_id = int(message.from_user.id)
 
     welcome_text = (
         f"Welcome, {user_name}!\n\n"
@@ -664,14 +1071,24 @@ async def cmd_start(message: types.Message):
         f"<i>Your market edge begins here.</i>"
     )
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    keyboard_rows = [
         [
             InlineKeyboardButton(
                 text="Open Eric Cole",
                 web_app=WebAppInfo(url=os.getenv("WEB_APP_URL"))
             )
         ]
-    ])
+    ]
+    if await is_admin_user(user_id):
+        keyboard_rows.append(
+            [
+                InlineKeyboardButton(
+                    text="Admin Center",
+                    web_app=WebAppInfo(url=build_admin_webapp_url())
+                )
+            ]
+        )
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
     if menu_photo_file_id:
         await message.answer_photo(

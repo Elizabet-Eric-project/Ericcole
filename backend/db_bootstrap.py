@@ -1,3 +1,4 @@
+import os
 import aiomysql
 
 
@@ -171,6 +172,17 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                 """
             )
 
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS admin_users (
+                    user_id BIGINT NOT NULL PRIMARY KEY,
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    granted_by BIGINT NULL,
+                    granted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+
         await _ensure_column(conn, db_name, "users", "strategy_id", "ALTER TABLE users ADD COLUMN strategy_id BIGINT NULL")
         await _ensure_column(conn, db_name, "users", "lang", "ALTER TABLE users ADD COLUMN lang VARCHAR(16) NOT NULL DEFAULT 'ru'")
         await _ensure_column(conn, db_name, "users", "mode", "ALTER TABLE users ADD COLUMN mode VARCHAR(16) NOT NULL DEFAULT 'forex'")
@@ -210,7 +222,24 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
             "ALTER TABLE ai_chats ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
         )
 
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_users",
+            "is_active",
+            "ALTER TABLE admin_users ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1",
+        )
+        await _ensure_column(conn, db_name, "admin_users", "granted_by", "ALTER TABLE admin_users ADD COLUMN granted_by BIGINT NULL")
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_users",
+            "granted_at",
+            "ALTER TABLE admin_users ADD COLUMN granted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        )
+
         await _ensure_index(conn, db_name, "users", "idx_users_strategy_id", "CREATE INDEX idx_users_strategy_id ON users(strategy_id)")
+        await _ensure_index(conn, db_name, "admin_users", "idx_admin_users_active", "CREATE INDEX idx_admin_users_active ON admin_users(is_active)")
         await _ensure_index(
             conn,
             db_name,
@@ -292,4 +321,18 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                 VALUES (1, 'You are a helpful trading assistant.', 'gpt-4o-mini')
                 ON DUPLICATE KEY UPDATE id = id
                 """
+            )
+
+            raw_default_admin_id = (os.getenv("ADMIN_DEFAULT_USER_ID") or "7097261848").strip()
+            try:
+                default_admin_user_id = int(raw_default_admin_id)
+            except (TypeError, ValueError):
+                default_admin_user_id = 7097261848
+            await cur.execute(
+                """
+                INSERT INTO admin_users (user_id, is_active, granted_by)
+                VALUES (%s, 1, %s)
+                ON DUPLICATE KEY UPDATE is_active = 1
+                """,
+                (default_admin_user_id, default_admin_user_id),
             )

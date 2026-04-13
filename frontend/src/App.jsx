@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { initTelegramApp } from './lib/tgSetup';
-import { apiFetchJson, isTelegramWebAppAvailable } from './lib/api';
+import { apiFetchJson, apiAdminFetchJson, isAdminRoute, isTelegramWebAppAvailable } from './lib/api';
 
 import Loader from './components/Loader/Loader';
 import BinaryHome from './components/binary/BinaryHome';
@@ -18,6 +18,7 @@ import FAQ from './components/pages/FAQ';
 import Support from './components/pages/Support';
 import LogAnalysis from './components/pages/LogAnalysis';
 import OpenViaBot from './components/pages/OpenViaBot';
+import AdminApp from './admin/AdminApp';
 
 import Header from './components/Header/Header.jsx';
 import BackgroundCandles from './components/BackgroundCandles/BackgroundCandles.jsx';
@@ -33,6 +34,9 @@ function App() {
   const [toastMessage, setToastMessage] = useState(null);
   const [strategies, setStrategies] = useState([]);
   const [allIndicators, setAllIndicators] = useState([]);
+  const [adminInitDone, setAdminInitDone] = useState(false);
+  const [adminAuthError, setAdminAuthError] = useState('');
+  const [adminUser, setAdminUser] = useState(null);
 
   const [forexParams, setForexParams] = useState({ pair: null, exp: null });
   const [binaryParams, setBinaryParams] = useState({ pair: null, exp: null });
@@ -46,6 +50,7 @@ function App() {
   const activeBackHandler = useRef(null); 
 
   const t = texts.en;
+  const adminMode = useMemo(() => isAdminRoute(), []);
 
   useEffect(() => {
     const syncUser = async () => {
@@ -66,6 +71,20 @@ function App() {
         if (!tg) return;
 
         setIsTgWebApp(true);
+
+        if (adminMode) {
+          try {
+            const me = await apiAdminFetchJson('/api/admin/me');
+            setAdminUser(me?.user || null);
+            setAdminAuthError('');
+          } catch (error) {
+            setAdminUser(null);
+            setAdminAuthError(error.message || 'Admin auth failed');
+          } finally {
+            setAdminInitDone(true);
+          }
+          return;
+        }
 
         await apiFetchJson('/api/user/sync', {
           method: 'POST',
@@ -89,14 +108,19 @@ function App() {
           setCurrentPage(userData.mode === 'binary' ? 'signals' : 'analysis');
         }
       } catch (error) {
-        const fallbackUser = { mode: 'binary', strategy_id: 1, lang: 'en' };
-        setUser(fallbackUser);
-        setCurrentPage('signals');
+        if (adminMode) {
+          setAdminAuthError(error.message || 'Admin init failed');
+          setAdminInitDone(true);
+        } else {
+          const fallbackUser = { mode: 'binary', strategy_id: 1, lang: 'en' };
+          setUser(fallbackUser);
+          setCurrentPage('signals');
+        }
       }
     };
 
     syncUser();
-  }, []);
+  }, [adminMode]);
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
@@ -225,6 +249,10 @@ function App() {
   const bottomPadding = isChatPage ? 86 : 106;
 
   if (!isTgWebApp) return <OpenViaBot botUsername={botUsername} />;
+  if (adminMode) {
+    if (!adminInitDone) return <Loader t={t} />;
+    return <AdminApp adminUser={adminUser} authError={adminAuthError} />;
+  }
   if (!user) return <Loader t={t} />;
 
   const handlePageChange = (newPage) => {
