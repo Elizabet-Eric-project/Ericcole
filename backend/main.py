@@ -390,6 +390,18 @@ def apply_stream_override_to_analysis(analysis_data: dict, stream_settings: dict
     analysis_data["confidence"] = confidence
 
     levels_mode = str(stream_settings.get("levels_mode") or "auto").strip().lower()
+    key_levels = analysis_data.get("key_levels")
+    if not isinstance(key_levels, dict):
+        key_levels = {}
+
+    price_raw = analysis_data.get("price", key_levels.get("current_price"))
+    try:
+        current_price = float(price_raw) if price_raw is not None else None
+    except (TypeError, ValueError):
+        current_price = None
+    if current_price is not None:
+        key_levels["current_price"] = round(current_price, 5)
+
     if levels_mode == "manual":
         raw_sl = stream_settings.get("manual_conservative_sl")
         raw_tp = stream_settings.get("manual_take_profit")
@@ -401,14 +413,46 @@ def apply_stream_override_to_analysis(analysis_data: dict, stream_settings: dict
             manual_tp = float(raw_tp) if raw_tp is not None else None
         except (TypeError, ValueError):
             manual_tp = None
-        key_levels = analysis_data.get("key_levels")
-        if not isinstance(key_levels, dict):
-            key_levels = {}
         if manual_sl is not None:
             key_levels["conservative_sl"] = round(manual_sl, 5)
         if manual_tp is not None:
             key_levels["rr_2_1_target"] = round(manual_tp, 5)
-        analysis_data["key_levels"] = key_levels
+
+    sl_missing = key_levels.get("conservative_sl") in (None, "")
+    tp_missing = key_levels.get("rr_2_1_target") in (None, "")
+    if current_price is not None and (sl_missing or tp_missing):
+        atr_value = None
+        if isinstance(indicators, dict):
+            atr_indicator = indicators.get("ATR")
+            if isinstance(atr_indicator, dict):
+                atr_source = atr_indicator.get("value")
+                if isinstance(atr_source, dict):
+                    atr_source = atr_source.get("atr")
+                try:
+                    atr_value = float(atr_source) if atr_source is not None else None
+                except (TypeError, ValueError):
+                    atr_value = None
+            elif isinstance(atr_indicator, (int, float)):
+                atr_value = float(atr_indicator)
+
+        abs_price = abs(current_price)
+        atr_abs = abs(float(atr_value)) if atr_value is not None else 0.0
+        sl_step = max(atr_abs * 1.25, abs_price * 0.0008, 0.0001)
+        tp_step = max(atr_abs * 2.0, abs_price * 0.0016, 0.0002)
+
+        if forced_signal == "BUY":
+            auto_sl = current_price - sl_step
+            auto_tp = current_price + tp_step
+        else:
+            auto_sl = current_price + sl_step
+            auto_tp = current_price - tp_step
+
+        if sl_missing:
+            key_levels["conservative_sl"] = round(auto_sl, 5)
+        if tp_missing:
+            key_levels["rr_2_1_target"] = round(auto_tp, 5)
+
+    analysis_data["key_levels"] = key_levels
 
     analysis_data["confidence_reason"] = "admin_stream_override"
     analysis_data["stream_override"] = {
