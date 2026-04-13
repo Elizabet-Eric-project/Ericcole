@@ -19,6 +19,10 @@ try:
     from backend.telegram_auth import get_telegram_user
 except ModuleNotFoundError:
     from telegram_auth import get_telegram_user
+try:
+    from backend.db_bootstrap import ensure_database_schema
+except ModuleNotFoundError:
+    from db_bootstrap import ensure_database_schema
 
 load_dotenv()
 
@@ -740,6 +744,7 @@ async def start_api():
 async def main():
     global db_pool
     db_pool = await aiomysql.create_pool(**DB_CONFIG)
+    await ensure_database_schema(db_pool)
     
     await asyncio.gather(
         start_bot(), 
