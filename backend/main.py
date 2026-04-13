@@ -258,6 +258,49 @@ async def admin_stats(
             except Exception:
                 users_growth = []
 
+            users_by_day = []
+            try:
+                await cur.execute(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM users
+                    WHERE DATE(created_at) < %s
+                    """,
+                    (from_date,),
+                )
+                base_total = int((await cur.fetchone() or {}).get("cnt") or 0)
+
+                await cur.execute(
+                    """
+                    SELECT DATE(created_at) AS d, COUNT(*) AS cnt
+                    FROM users
+                    WHERE DATE(created_at) BETWEEN %s AND %s
+                    GROUP BY DATE(created_at)
+                    ORDER BY d ASC
+                    """,
+                    (from_date, to_date),
+                )
+                daily_rows = await cur.fetchall()
+                daily_map = {str(row["d"]): int(row["cnt"]) for row in (daily_rows or [])}
+
+                day_cursor = from_dt.date()
+                day_end = to_dt.date()
+                running_total = base_total
+                while day_cursor <= day_end:
+                    day_iso = day_cursor.isoformat()
+                    new_count = int(daily_map.get(day_iso, 0))
+                    running_total += new_count
+                    users_by_day.append(
+                        {
+                            "date": day_iso,
+                            "new": new_count,
+                            "total": running_total,
+                        }
+                    )
+                    day_cursor += timedelta(days=1)
+            except Exception:
+                users_by_day = []
+
     return {
         "status": "success",
         "stats": {
@@ -267,6 +310,7 @@ async def admin_stats(
             "chats_total": chats_total,
             "mode_breakdown": mode_breakdown,
             "users_growth_7d": users_growth,
+            "users_by_day": users_by_day,
             "users_growth_period": {
                 "from": from_date,
                 "to": to_date,
