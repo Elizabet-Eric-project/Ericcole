@@ -46,10 +46,21 @@ export async function apiFetch(url, options = {}) {
 
 export async function apiFetchJson(url, options = {}) {
   const response = await apiFetch(url, options);
-  const data = await response.json();
+  const raw = await response.text();
+  let data = null;
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = null;
+    }
+  }
   if (!response.ok) {
-    const message = data?.detail || data?.error || 'Request failed';
+    const message = data?.detail || data?.error || raw || 'Request failed';
     throw new Error(message);
+  }
+  if (!data) {
+    throw new Error(raw || 'Server returned invalid JSON');
   }
   return data;
 }
@@ -68,10 +79,21 @@ export async function apiAdminFetch(url, options = {}) {
 
 export async function apiAdminFetchJson(url, options = {}) {
   const response = await apiAdminFetch(url, options);
-  const data = await response.json();
+  const raw = await response.text();
+  let data = null;
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = null;
+    }
+  }
   if (!response.ok) {
-    const message = data?.detail || data?.error || 'Request failed';
+    const message = data?.detail || data?.error || raw || 'Request failed';
     throw new Error(message);
+  }
+  if (!data) {
+    throw new Error(raw || 'Server returned invalid JSON');
   }
   return data;
 }

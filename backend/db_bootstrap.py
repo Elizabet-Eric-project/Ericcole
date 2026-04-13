@@ -186,6 +186,20 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
         await _ensure_column(conn, db_name, "users", "strategy_id", "ALTER TABLE users ADD COLUMN strategy_id BIGINT NULL")
         await _ensure_column(conn, db_name, "users", "lang", "ALTER TABLE users ADD COLUMN lang VARCHAR(16) NOT NULL DEFAULT 'ru'")
         await _ensure_column(conn, db_name, "users", "mode", "ALTER TABLE users ADD COLUMN mode VARCHAR(16) NOT NULL DEFAULT 'forex'")
+        await _ensure_column(
+            conn,
+            db_name,
+            "users",
+            "created_at",
+            "ALTER TABLE users ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "users",
+            "updated_at",
+            "ALTER TABLE users ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+        )
 
         await _ensure_column(conn, db_name, "presets", "icon", "ALTER TABLE presets ADD COLUMN icon VARCHAR(64) NULL DEFAULT '⚡'")
         await _ensure_column(
@@ -336,3 +350,4 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                 """,
                 (default_admin_user_id, default_admin_user_id),
             )
+

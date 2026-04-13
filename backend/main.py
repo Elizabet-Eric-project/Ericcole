@@ -187,41 +187,49 @@ async def admin_me(admin=Depends(get_admin_user)):
 
 @app.get("/api/admin/stats")
 async def admin_stats(admin=Depends(get_admin_user)):
+    async def safe_count(cur, sql: str) -> int:
+        try:
+            await cur.execute(sql)
+            return int((await cur.fetchone() or {}).get("cnt") or 0)
+        except Exception:
+            return 0
+
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
-            await cur.execute("SELECT COUNT(*) AS cnt FROM users")
-            users_total = int((await cur.fetchone() or {}).get("cnt") or 0)
+            users_total = await safe_count(cur, "SELECT COUNT(*) AS cnt FROM users")
+            admins_total = await safe_count(cur, "SELECT COUNT(*) AS cnt FROM admin_users WHERE is_active = 1")
+            active_analyses = await safe_count(cur, "SELECT COUNT(*) AS cnt FROM user_analyses WHERE status = 'active'")
+            chats_total = await safe_count(cur, "SELECT COUNT(*) AS cnt FROM ai_chats")
 
-            await cur.execute("SELECT COUNT(*) AS cnt FROM admin_users WHERE is_active = 1")
-            admins_total = int((await cur.fetchone() or {}).get("cnt") or 0)
+            mode_breakdown = {}
+            try:
+                await cur.execute(
+                    """
+                    SELECT mode, COUNT(*) AS cnt
+                    FROM users
+                    GROUP BY mode
+                    """
+                )
+                modes_rows = await cur.fetchall()
+                mode_breakdown = {row["mode"]: int(row["cnt"]) for row in (modes_rows or []) if row.get("mode")}
+            except Exception:
+                mode_breakdown = {}
 
-            await cur.execute("SELECT COUNT(*) AS cnt FROM user_analyses WHERE status = 'active'")
-            active_analyses = int((await cur.fetchone() or {}).get("cnt") or 0)
-
-            await cur.execute("SELECT COUNT(*) AS cnt FROM ai_chats")
-            chats_total = int((await cur.fetchone() or {}).get("cnt") or 0)
-
-            await cur.execute(
-                """
-                SELECT mode, COUNT(*) AS cnt
-                FROM users
-                GROUP BY mode
-                """
-            )
-            modes_rows = await cur.fetchall()
-            mode_breakdown = {row["mode"]: int(row["cnt"]) for row in (modes_rows or [])}
-
-            await cur.execute(
-                """
-                SELECT DATE(created_at) AS d, COUNT(*) AS cnt
-                FROM users
-                WHERE created_at >= NOW() - INTERVAL 7 DAY
-                GROUP BY DATE(created_at)
-                ORDER BY d ASC
-                """
-            )
-            growth_rows = await cur.fetchall()
-            users_growth = [{"date": str(row["d"]), "count": int(row["cnt"])} for row in (growth_rows or [])]
+            users_growth = []
+            try:
+                await cur.execute(
+                    """
+                    SELECT DATE(created_at) AS d, COUNT(*) AS cnt
+                    FROM users
+                    WHERE created_at >= NOW() - INTERVAL 7 DAY
+                    GROUP BY DATE(created_at)
+                    ORDER BY d ASC
+                    """
+                )
+                growth_rows = await cur.fetchall()
+                users_growth = [{"date": str(row["d"]), "count": int(row["cnt"])} for row in (growth_rows or [])]
+            except Exception:
+                users_growth = []
 
     return {
         "status": "success",
@@ -245,22 +253,40 @@ async def admin_users(limit: int = 50, offset: int = 0, search: str = "", admin=
 
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
-            await cur.execute(
-                """
-                SELECT u.user_id, u.username, u.first_name, u.mode, u.lang, u.strategy_id, u.created_at,
-                       p.name AS strategy_name,
-                       CASE WHEN a.user_id IS NULL THEN 0 ELSE a.is_active END AS is_admin,
-                       a.granted_at
-                FROM users u
-                LEFT JOIN presets p ON p.id = u.strategy_id
-                LEFT JOIN admin_users a ON a.user_id = u.user_id
-                WHERE (%s = '' OR CAST(u.user_id AS CHAR) LIKE %s OR COALESCE(u.username, '') LIKE %s OR COALESCE(u.first_name, '') LIKE %s)
-                ORDER BY u.created_at DESC
-                LIMIT %s OFFSET %s
-                """,
-                (search, like, like, like, limit, offset),
-            )
-            users_rows = await cur.fetchall()
+            try:
+                await cur.execute(
+                    """
+                    SELECT u.user_id, u.username, u.first_name, u.mode, u.lang, u.strategy_id, u.created_at,
+                           p.name AS strategy_name,
+                           CASE WHEN a.user_id IS NULL THEN 0 ELSE a.is_active END AS is_admin,
+                           a.granted_at
+                    FROM users u
+                    LEFT JOIN presets p ON p.id = u.strategy_id
+                    LEFT JOIN admin_users a ON a.user_id = u.user_id
+                    WHERE (%s = '' OR CAST(u.user_id AS CHAR) LIKE %s OR COALESCE(u.username, '') LIKE %s OR COALESCE(u.first_name, '') LIKE %s)
+                    ORDER BY u.created_at DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    (search, like, like, like, limit, offset),
+                )
+                users_rows = await cur.fetchall()
+            except Exception:
+                await cur.execute(
+                    """
+                    SELECT u.user_id, u.username, u.first_name, u.mode, u.lang, u.strategy_id, NULL AS created_at,
+                           p.name AS strategy_name,
+                           CASE WHEN a.user_id IS NULL THEN 0 ELSE a.is_active END AS is_admin,
+                           a.granted_at
+                    FROM users u
+                    LEFT JOIN presets p ON p.id = u.strategy_id
+                    LEFT JOIN admin_users a ON a.user_id = u.user_id
+                    WHERE (%s = '' OR CAST(u.user_id AS CHAR) LIKE %s OR COALESCE(u.username, '') LIKE %s OR COALESCE(u.first_name, '') LIKE %s)
+                    ORDER BY u.user_id DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    (search, like, like, like, limit, offset),
+                )
+                users_rows = await cur.fetchall()
 
             await cur.execute(
                 """
@@ -305,6 +331,20 @@ async def admin_grant(request: Request, admin=Depends(get_admin_user)):
 
     granted_by = int(admin["user_id"])
     async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT user_id
+                FROM users
+                WHERE user_id = %s
+                LIMIT 1
+                """,
+                (target_user_id,),
+            )
+            user_row = await cur.fetchone()
+            if not user_row:
+                raise HTTPException(status_code=404, detail="User not found")
+
         async with conn.cursor() as cur:
             await cur.execute(
                 """
