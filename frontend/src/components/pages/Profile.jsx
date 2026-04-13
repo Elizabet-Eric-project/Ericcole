@@ -49,6 +49,12 @@ export default function Profile({
     return `${Math.abs(parsed - Math.round(parsed)) < 0.01 ? Math.round(parsed) : parsed.toFixed(1)}%`;
   };
 
+  const getStrategyWinrate = (strategy) => (
+    formatWinrate(strategy?.display_winrate) ||
+    formatWinrate(strategy?.actual_winrate) ||
+    formatWinrate(strategy?.public_winrate)
+  );
+
   const openCreateModal = () => {
     setEditPresetId(null);
     setFormData({ name: '', indicators: [], icon: '\u26A1' });
@@ -222,12 +228,12 @@ export default function Profile({
 
           <div className="strategy-details">
             <p><strong>{t.profile.indicatorsLabel}</strong> {selectedStrategy.indicators_list || t.profile.noData}</p>
-            <p><strong>Winrate:</strong> {formatWinrate(selectedStrategy.public_winrate) || t.profile.noData}</p>
+            <p><strong>Winrate:</strong> {getStrategyWinrate(selectedStrategy) || t.profile.noData}</p>
           </div>
 
           <div className="strategies-grid" style={{ marginTop: '15px' }}>
             {systemStrategies.map((strat) => {
-              const winrateLabel = formatWinrate(strat.public_winrate);
+              const winrateLabel = getStrategyWinrate(strat);
               return (
                 <div
                   key={strat.id}
@@ -252,7 +258,7 @@ export default function Profile({
           {myStrategies.length > 0 && (
             <div className="custom-strategies-list">
               {myStrategies.map((strat) => {
-                const winrateLabel = formatWinrate(strat.public_winrate);
+                const winrateLabel = getStrategyWinrate(strat);
                 return (
                   <div key={strat.id} className={`custom-strategy-item ${user.strategy_id === strat.id ? 'active' : ''}`}>
                     <div className="custom-strat-icon-wrapper">{strat.icon || '\uD83D\uDCDD'}</div>

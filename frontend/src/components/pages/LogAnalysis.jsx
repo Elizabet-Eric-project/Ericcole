@@ -16,6 +16,11 @@ const formatPercent = (value) => {
   return Math.abs(rounded - Math.round(rounded)) < 0.01 ? `${Math.round(rounded)}%` : `${rounded.toFixed(1)}%`;
 };
 
+const resolveStrategyWinrate = (strategy) =>
+  toNumberOrNull(strategy?.display_winrate) ??
+  toNumberOrNull(strategy?.actual_winrate) ??
+  toNumberOrNull(strategy?.public_winrate);
+
 export default function LogAnalysis({ user, t, strategies = [] }) {
   const [history, setHistory] = useState([]);
   const [stats, setStats] = useState({ success: 0, fail: 0, skipped: 0, total: 0, closed_total: 0, winrate: 0 });
@@ -80,7 +85,7 @@ export default function LogAnalysis({ user, t, strategies = [] }) {
   const gaugeArcLength = 157;
   const gaugeFill = (gaugeArcLength * winrateValue) / 100;
 
-  const selectedStrategyPublicWinrate = toNumberOrNull(selectedStrategy?.public_winrate);
+  const selectedStrategyWinrate = resolveStrategyWinrate(selectedStrategy);
   const allStrategiesLabel = logT.allStrategies || 'All strategies';
 
   return (
@@ -97,7 +102,7 @@ export default function LogAnalysis({ user, t, strategies = [] }) {
           <option value="all">{allStrategiesLabel}</option>
           {(strategies || []).map((strategy) => (
             <option key={strategy.id} value={strategy.id}>
-              {(strategy.icon || '⚡') + ' ' + strategy.name}
+              {(strategy.icon || '\u26A1') + ' ' + strategy.name}
             </option>
           ))}
         </select>
@@ -130,7 +135,7 @@ export default function LogAnalysis({ user, t, strategies = [] }) {
         <div className="log-winrate-subline">
           {logT.closedLabel || 'Closed'}: {closedTotal}
           {selectedStrategy ? ` | ${selectedStrategy.name}` : ''}
-          {selectedStrategyPublicWinrate !== null ? ` | ${logT.strategyWinrate || 'Strategy winrate'}: ${formatPercent(selectedStrategyPublicWinrate)}` : ''}
+          {selectedStrategyWinrate !== null ? ` | ${logT.strategyWinrate || 'Strategy winrate'}: ${formatPercent(selectedStrategyWinrate)}` : ''}
         </div>
       </div>
 
@@ -139,7 +144,8 @@ export default function LogAnalysis({ user, t, strategies = [] }) {
       ) : (
         <div className="log-list">
           {history.map((item) => {
-            const strategyWinrate = toNumberOrNull(item.public_winrate) ?? toNumberOrNull(strategiesMap.get(Number(item.strategy_id))?.public_winrate);
+            const mappedStrategy = strategiesMap.get(Number(item.strategy_id));
+            const strategyWinrate = resolveStrategyWinrate(mappedStrategy) ?? toNumberOrNull(item.public_winrate);
             return (
               <div
                 key={item.id}

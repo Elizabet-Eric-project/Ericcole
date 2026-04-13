@@ -1484,6 +1484,16 @@ async def get_strategies(user=Depends(get_telegram_user)):
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
                 SELECT p.id, p.name, p.is_system, p.icon, p.allowed_timeframes, p.public_winrate,
+                       (
+                           SELECT COUNT(*)
+                           FROM user_analyses ua
+                           WHERE ua.strategy_id = p.id AND ua.status = 'success'
+                       ) AS wins_count,
+                       (
+                           SELECT COUNT(*)
+                           FROM user_analyses ua
+                           WHERE ua.strategy_id = p.id AND ua.status IN ('success', 'fail')
+                       ) AS closed_signals,
                        GROUP_CONCAT(i.name SEPARATOR ', ') as indicators_list,
                        GROUP_CONCAT(i.id SEPARATOR ',') as indicator_ids,
                        GROUP_CONCAT(i.key SEPARATOR ',') as indicator_keys
@@ -1495,6 +1505,21 @@ async def get_strategies(user=Depends(get_telegram_user)):
                 GROUP BY p.id
             """, (user_id,))
             strategies = await cur.fetchall()
+    for strategy in strategies or []:
+        wins_count = int(strategy.get("wins_count") or 0)
+        closed_signals = int(strategy.get("closed_signals") or 0)
+        actual_winrate = round((wins_count / closed_signals) * 100, 2) if closed_signals > 0 else 0.0
+        raw_public_winrate = strategy.get("public_winrate")
+        try:
+            public_winrate = float(raw_public_winrate) if raw_public_winrate is not None else None
+        except (TypeError, ValueError):
+            public_winrate = None
+        display_winrate = public_winrate if public_winrate is not None else actual_winrate
+        strategy["wins_count"] = wins_count
+        strategy["closed_signals"] = closed_signals
+        strategy["actual_winrate"] = actual_winrate
+        strategy["public_winrate"] = public_winrate
+        strategy["display_winrate"] = round(float(display_winrate), 2)
     return {"strategies": strategies}
 
 @app.post("/api/user/strategy")
