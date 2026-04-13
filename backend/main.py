@@ -706,19 +706,75 @@ async def admin_strategies(admin=Depends(get_admin_user)):
             await cur.execute(
                 """
                 SELECT p.id, p.name, p.icon, p.is_system, p.allowed_timeframes,
-                       GROUP_CONCAT(i.name SEPARATOR ', ') AS indicators_list,
-                       GROUP_CONCAT(i.id SEPARATOR ',') AS indicator_ids,
-                       COUNT(DISTINCT up.user_id) AS usage_count
+                       (
+                           SELECT GROUP_CONCAT(i.name ORDER BY i.name SEPARATOR ', ')
+                           FROM preset_indicators pi
+                           JOIN indicators i ON i.id = pi.indicator_id
+                           WHERE pi.preset_id = p.id
+                       ) AS indicators_list,
+                       (
+                           SELECT GROUP_CONCAT(i.id ORDER BY i.id SEPARATOR ',')
+                           FROM preset_indicators pi
+                           JOIN indicators i ON i.id = pi.indicator_id
+                           WHERE pi.preset_id = p.id
+                       ) AS indicator_ids,
+                       (
+                           SELECT COUNT(*)
+                           FROM users u
+                           WHERE u.strategy_id = p.id
+                       ) AS users_count,
+                       (
+                           SELECT COUNT(*)
+                           FROM user_analyses ua
+                           WHERE ua.strategy_id = p.id
+                       ) AS signals_count,
+                       (
+                           SELECT COUNT(*)
+                           FROM user_analyses ua
+                           WHERE ua.strategy_id = p.id AND ua.status = 'success'
+                       ) AS wins_count,
+                       (
+                           SELECT COUNT(*)
+                           FROM user_analyses ua
+                           WHERE ua.strategy_id = p.id AND ua.status IN ('success', 'fail')
+                       ) AS closed_signals
                 FROM presets p
-                LEFT JOIN preset_indicators pi ON p.id = pi.preset_id
-                LEFT JOIN indicators i ON pi.indicator_id = i.id
-                LEFT JOIN user_presets up ON p.id = up.preset_id
-                GROUP BY p.id
                 ORDER BY p.is_system DESC, p.id ASC
                 """
             )
             rows = await cur.fetchall()
-    return {"status": "success", "strategies": rows or []}
+            await cur.execute("SELECT id, name, `key` FROM indicators ORDER BY name ASC")
+            indicators = await cur.fetchall()
+
+    normalized_rows = []
+    for row in rows or []:
+        users_count = int(row.get("users_count") or 0)
+        signals_count = int(row.get("signals_count") or 0)
+        wins_count = int(row.get("wins_count") or 0)
+        closed_signals = int(row.get("closed_signals") or 0)
+        winrate = 0.0 if closed_signals <= 0 else round((wins_count / closed_signals) * 100, 2)
+
+        row["users_count"] = users_count
+        row["usage_count"] = users_count
+        row["signals_count"] = signals_count
+        row["wins_count"] = wins_count
+        row["closed_signals"] = closed_signals
+        row["winrate"] = winrate
+        normalized_rows.append(row)
+
+    system_count = sum(1 for row in normalized_rows if int(row.get("is_system") or 0) == 1)
+    user_count = sum(1 for row in normalized_rows if int(row.get("is_system") or 0) != 1)
+
+    return {
+        "status": "success",
+        "strategies": normalized_rows,
+        "indicators": indicators or [],
+        "summary": {
+            "total_count": len(normalized_rows),
+            "system_count": system_count,
+            "user_count": user_count,
+        },
+    }
 
 
 @app.post("/api/admin/strategies/update")
@@ -732,11 +788,36 @@ async def admin_strategies_update(request: Request, admin=Depends(get_admin_user
     icon = (data.get("icon") or "⚡").strip()[:32]
     allowed_timeframes = (data.get("allowed_timeframes") or "").strip()
     is_system = 1 if bool(data.get("is_system")) else 0
+    indicators = data.get("indicators")
     if not name:
         raise HTTPException(status_code=400, detail="Strategy name is required")
 
+    indicator_ids = []
+    if isinstance(indicators, list):
+        seen = set()
+        for raw_id in indicators:
+            try:
+                ind_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            if ind_id <= 0 or ind_id in seen:
+                continue
+            seen.add(ind_id)
+            indicator_ids.append(ind_id)
+
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
+            await cur.execute("SELECT is_system FROM presets WHERE id = %s LIMIT 1", (strategy_id,))
+            current_row = await cur.fetchone()
+            if not current_row:
+                raise HTTPException(status_code=404, detail="Strategy not found")
+
+            current_is_system = int(current_row[0] or 0)
+            if current_is_system == 0 and is_system == 1:
+                raise HTTPException(status_code=400, detail="User strategy cannot be converted to system strategy")
+            if current_is_system == 0:
+                is_system = 0
+
             await cur.execute(
                 """
                 UPDATE presets
@@ -748,6 +829,22 @@ async def admin_strategies_update(request: Request, admin=Depends(get_admin_user
                 """,
                 (name, icon, allowed_timeframes, is_system, strategy_id),
             )
+
+            if isinstance(indicators, list):
+                valid_ids = []
+                if indicator_ids:
+                    placeholders = ", ".join(["%s"] * len(indicator_ids))
+                    await cur.execute(f"SELECT id FROM indicators WHERE id IN ({placeholders})", tuple(indicator_ids))
+                    rows = await cur.fetchall()
+                    allowed = {int(row[0]) for row in (rows or [])}
+                    valid_ids = [ind_id for ind_id in indicator_ids if ind_id in allowed]
+
+                await cur.execute("DELETE FROM preset_indicators WHERE preset_id = %s", (strategy_id,))
+                if valid_ids:
+                    await cur.executemany(
+                        "INSERT INTO preset_indicators (preset_id, indicator_id) VALUES (%s, %s)",
+                        [(strategy_id, ind_id) for ind_id in valid_ids],
+                    )
     return {"status": "success"}
 
 
@@ -1479,3 +1576,4 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             pass
     asyncio.run(main_wrapper())
+
