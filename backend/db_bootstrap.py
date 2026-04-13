@@ -1,3 +1,4 @@
+import os
 import aiomysql
 
 
@@ -81,6 +82,7 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     is_system TINYINT(1) NOT NULL DEFAULT 0,
                     icon VARCHAR(64) NULL DEFAULT '⚡',
                     allowed_timeframes VARCHAR(255) NULL DEFAULT '5m,15m,30m,1h,4h,1d',
+                    public_winrate DECIMAL(6,2) NULL DEFAULT NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
@@ -171,9 +173,54 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                 """
             )
 
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS admin_users (
+                    user_id BIGINT NOT NULL PRIMARY KEY,
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    granted_by BIGINT NULL,
+                    granted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS admin_stream_settings (
+                    id INT NOT NULL PRIMARY KEY,
+                    is_enabled TINYINT(1) NOT NULL DEFAULT 0,
+                    scope VARCHAR(16) NOT NULL DEFAULT 'all',
+                    strategy_id BIGINT NULL,
+                    forced_signal VARCHAR(8) NOT NULL DEFAULT 'BUY',
+                    levels_mode VARCHAR(16) NOT NULL DEFAULT 'auto',
+                    manual_conservative_sl DOUBLE NULL,
+                    manual_take_profit DOUBLE NULL,
+                    indicator_mode VARCHAR(16) NOT NULL DEFAULT 'auto',
+                    indicator_overrides LONGTEXT NULL,
+                    message TEXT NULL,
+                    updated_by BIGINT NULL,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+
         await _ensure_column(conn, db_name, "users", "strategy_id", "ALTER TABLE users ADD COLUMN strategy_id BIGINT NULL")
         await _ensure_column(conn, db_name, "users", "lang", "ALTER TABLE users ADD COLUMN lang VARCHAR(16) NOT NULL DEFAULT 'ru'")
         await _ensure_column(conn, db_name, "users", "mode", "ALTER TABLE users ADD COLUMN mode VARCHAR(16) NOT NULL DEFAULT 'forex'")
+        await _ensure_column(
+            conn,
+            db_name,
+            "users",
+            "created_at",
+            "ALTER TABLE users ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "users",
+            "updated_at",
+            "ALTER TABLE users ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+        )
 
         await _ensure_column(conn, db_name, "presets", "icon", "ALTER TABLE presets ADD COLUMN icon VARCHAR(64) NULL DEFAULT '⚡'")
         await _ensure_column(
@@ -182,6 +229,13 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
             "presets",
             "allowed_timeframes",
             "ALTER TABLE presets ADD COLUMN allowed_timeframes VARCHAR(255) NULL DEFAULT '5m,15m,30m,1h,4h,1d'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "presets",
+            "public_winrate",
+            "ALTER TABLE presets ADD COLUMN public_winrate DECIMAL(6,2) NULL DEFAULT NULL",
         )
 
         await _ensure_column(conn, db_name, "user_analyses", "news_data", "ALTER TABLE user_analyses ADD COLUMN news_data LONGTEXT NULL")
@@ -210,7 +264,108 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
             "ALTER TABLE ai_chats ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
         )
 
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_users",
+            "is_active",
+            "ALTER TABLE admin_users ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1",
+        )
+        await _ensure_column(conn, db_name, "admin_users", "granted_by", "ALTER TABLE admin_users ADD COLUMN granted_by BIGINT NULL")
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_users",
+            "granted_at",
+            "ALTER TABLE admin_users ADD COLUMN granted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "is_enabled",
+            "ALTER TABLE admin_stream_settings ADD COLUMN is_enabled TINYINT(1) NOT NULL DEFAULT 0",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "scope",
+            "ALTER TABLE admin_stream_settings ADD COLUMN scope VARCHAR(16) NOT NULL DEFAULT 'all'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "strategy_id",
+            "ALTER TABLE admin_stream_settings ADD COLUMN strategy_id BIGINT NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "forced_signal",
+            "ALTER TABLE admin_stream_settings ADD COLUMN forced_signal VARCHAR(8) NOT NULL DEFAULT 'BUY'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "levels_mode",
+            "ALTER TABLE admin_stream_settings ADD COLUMN levels_mode VARCHAR(16) NOT NULL DEFAULT 'auto'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "manual_conservative_sl",
+            "ALTER TABLE admin_stream_settings ADD COLUMN manual_conservative_sl DOUBLE NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "manual_take_profit",
+            "ALTER TABLE admin_stream_settings ADD COLUMN manual_take_profit DOUBLE NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "indicator_mode",
+            "ALTER TABLE admin_stream_settings ADD COLUMN indicator_mode VARCHAR(16) NOT NULL DEFAULT 'auto'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "indicator_overrides",
+            "ALTER TABLE admin_stream_settings ADD COLUMN indicator_overrides LONGTEXT NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "message",
+            "ALTER TABLE admin_stream_settings ADD COLUMN message TEXT NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "updated_by",
+            "ALTER TABLE admin_stream_settings ADD COLUMN updated_by BIGINT NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "admin_stream_settings",
+            "updated_at",
+            "ALTER TABLE admin_stream_settings ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+        )
+
         await _ensure_index(conn, db_name, "users", "idx_users_strategy_id", "CREATE INDEX idx_users_strategy_id ON users(strategy_id)")
+        await _ensure_index(conn, db_name, "admin_users", "idx_admin_users_active", "CREATE INDEX idx_admin_users_active ON admin_users(is_active)")
         await _ensure_index(
             conn,
             db_name,
@@ -293,3 +448,39 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                 ON DUPLICATE KEY UPDATE id = id
                 """
             )
+
+            await cur.execute(
+                """
+                INSERT INTO admin_stream_settings (
+                    id,
+                    is_enabled,
+                    scope,
+                    strategy_id,
+                    forced_signal,
+                    levels_mode,
+                    manual_conservative_sl,
+                    manual_take_profit,
+                    indicator_mode,
+                    indicator_overrides,
+                    message,
+                    updated_by
+                )
+                VALUES (1, 0, 'all', NULL, 'BUY', 'auto', NULL, NULL, 'auto', '{}', '', NULL)
+                ON DUPLICATE KEY UPDATE id = id
+                """
+            )
+
+            raw_default_admin_id = (os.getenv("ADMIN_DEFAULT_USER_ID") or "7097261848").strip()
+            try:
+                default_admin_user_id = int(raw_default_admin_id)
+            except (TypeError, ValueError):
+                default_admin_user_id = 7097261848
+            await cur.execute(
+                """
+                INSERT INTO admin_users (user_id, is_active, granted_by)
+                VALUES (%s, 1, %s)
+                ON DUPLICATE KEY UPDATE is_active = 1
+                """,
+                (default_admin_user_id, default_admin_user_id),
+            )
+

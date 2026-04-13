@@ -43,6 +43,18 @@ export default function Profile({
   const systemStrategies = strategies.filter(s => s.is_system === 1);
   const myStrategies = strategies.filter(s => s.is_system === 0);
 
+  const formatWinrate = (value) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return null;
+    return `${Math.abs(parsed - Math.round(parsed)) < 0.01 ? Math.round(parsed) : parsed.toFixed(1)}%`;
+  };
+
+  const getStrategyWinrate = (strategy) => (
+    formatWinrate(strategy?.display_winrate) ||
+    formatWinrate(strategy?.actual_winrate) ||
+    formatWinrate(strategy?.public_winrate)
+  );
+
   const openCreateModal = () => {
     setEditPresetId(null);
     setFormData({ name: '', indicators: [], icon: '\u26A1' });
@@ -216,19 +228,24 @@ export default function Profile({
 
           <div className="strategy-details">
             <p><strong>{t.profile.indicatorsLabel}</strong> {selectedStrategy.indicators_list || t.profile.noData}</p>
+            <p><strong>Winrate:</strong> {getStrategyWinrate(selectedStrategy) || t.profile.noData}</p>
           </div>
 
           <div className="strategies-grid" style={{ marginTop: '15px' }}>
-            {systemStrategies.map((strat) => (
-              <div
-                key={strat.id}
-                className={`strategy-card ${user.strategy_id === strat.id ? 'active' : ''}`}
-                onClick={() => onUpdateStrategy(strat.id)}
-              >
-                <div className="strategy-icon">{strat.icon || '\u26A1'}</div>
-                <div className="strategy-name-text">{strat.name}</div>
-              </div>
-            ))}
+            {systemStrategies.map((strat) => {
+              const winrateLabel = getStrategyWinrate(strat);
+              return (
+                <div
+                  key={strat.id}
+                  className={`strategy-card ${user.strategy_id === strat.id ? 'active' : ''}`}
+                  onClick={() => onUpdateStrategy(strat.id)}
+                >
+                  <div className="strategy-icon">{strat.icon || '\u26A1'}</div>
+                  <div className="strategy-name-text">{strat.name}</div>
+                  {winrateLabel ? <div className="strategy-winrate-badge">Winrate {winrateLabel}</div> : null}
+                </div>
+              );
+            })}
           </div>
 
           <div className="profile-divider" style={{ margin: '25px 0 20px 0' }}></div>
@@ -240,18 +257,22 @@ export default function Profile({
 
           {myStrategies.length > 0 && (
             <div className="custom-strategies-list">
-              {myStrategies.map((strat) => (
-                <div key={strat.id} className={`custom-strategy-item ${user.strategy_id === strat.id ? 'active' : ''}`}>
-                  <div className="custom-strat-icon-wrapper">{strat.icon || '\uD83D\uDCDD'}</div>
-                  <div className="custom-strat-info" onClick={() => onUpdateStrategy(strat.id)}>
-                    <span className="strat-name">{strat.name}</span>
-                    <span className="strat-indicators">{strat.indicators_list}</span>
+              {myStrategies.map((strat) => {
+                const winrateLabel = getStrategyWinrate(strat);
+                return (
+                  <div key={strat.id} className={`custom-strategy-item ${user.strategy_id === strat.id ? 'active' : ''}`}>
+                    <div className="custom-strat-icon-wrapper">{strat.icon || '\uD83D\uDCDD'}</div>
+                    <div className="custom-strat-info" onClick={() => onUpdateStrategy(strat.id)}>
+                      <span className="strat-name">{strat.name}</span>
+                      <span className="strat-indicators">{strat.indicators_list}</span>
+                      {winrateLabel ? <span className="strat-winrate">Winrate {winrateLabel}</span> : null}
+                    </div>
+                    <button className="strat-edit-icon" onClick={() => openEditModal(strat)}>
+                      <span className="edit-icon-mask" style={{ maskImage: `url("${iconEdit}")`, WebkitMaskImage: `url("${iconEdit}")` }}></span>
+                    </button>
                   </div>
-                  <button className="strat-edit-icon" onClick={() => openEditModal(strat)}>
-                    <span className="edit-icon-mask" style={{ maskImage: `url("${iconEdit}")`, WebkitMaskImage: `url("${iconEdit}")` }}></span>
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

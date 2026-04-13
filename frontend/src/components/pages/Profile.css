@@ -342,6 +342,13 @@
   margin-top: 4px;
 }
 
+.strat-winrate {
+  margin-top: 4px;
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
 .strat-edit-icon {
   background: transparent;
   border: none;
@@ -539,6 +546,18 @@
 .strategy-name-text {
   font-size: 0.85rem;
   line-height: 1.2;
+}
+
+.strategy-winrate-badge {
+  margin-top: 2px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(139, 107, 44, 0.35);
+  background: rgba(244, 233, 208, 0.72);
+  color: var(--accent-strong);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.1;
 }
 
 .custom-strat-icon-wrapper {
