@@ -57,12 +57,38 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 db_pool = None
 bot = Bot(token=os.getenv("BOT_TOKEN"))
 dp = Dispatcher()
+menu_photo_file_id = (os.getenv("MENU_PHOTO_FILE_ID") or "").strip()
+menu_file_id_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "media", "menu.file_id")
+if not menu_photo_file_id and os.path.exists(menu_file_id_path):
+    try:
+        with open(menu_file_id_path, "r", encoding="utf-8") as f:
+            menu_photo_file_id = f.read().strip()
+    except Exception:
+        menu_photo_file_id = ""
 
 analysis_queue = asyncio.Queue()
 processing_ids = set() 
 price_cache = {} 
 
 COMMODITY_SYMBOLS = ["HG1", "W_1", "C_1", "S_1", "KC1", "CC1", "SB1", "CT1"]
+
+
+def resolve_menu_photo_path() -> str:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(base_dir, "media", "menu.jpg"),
+        os.path.join(base_dir, "media", "menu.png"),
+        os.path.join(base_dir, "..", "backend", "media", "menu.jpg"),
+        os.path.join(base_dir, "..", "backend", "media", "menu.png"),
+        os.path.join("media", "menu.jpg"),
+        os.path.join("media", "menu.png"),
+        os.path.join("backend", "media", "menu.jpg"),
+        os.path.join("backend", "media", "menu.png"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
 
 @app.get("/api/support/links")
 async def get_support_links():
@@ -627,10 +653,11 @@ async def update_analysis_status(request: Request, user=Depends(get_telegram_use
     
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
+    global menu_photo_file_id
     user_name = message.from_user.first_name or message.from_user.username or "Trader"
-    
+
     welcome_text = (
-        f"Welcome, {user_name}!👋\n\n"
+        f"Welcome, {user_name}!\n\n"
         f"<b>Eric Cole</b> | <code>Private Trading Analytics</code>\n\n"
         f"A professional analytical space for those who value precision. "
         f"We've combined advanced technical analysis methods with the convenience of a Web App.\n\n"
@@ -640,21 +667,35 @@ async def cmd_start(message: types.Message):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text="👉Open Eric Cole✨",
+                text="Open Eric Cole",
                 web_app=WebAppInfo(url=os.getenv("WEB_APP_URL"))
             )
         ]
     ])
-    
-    photo_path = "media/menu.png"
-    photo = FSInputFile(photo_path)
-    
-    await message.answer_photo(
-        photo=photo,
+
+    if menu_photo_file_id:
+        await message.answer_photo(
+            photo=menu_photo_file_id,
+            caption=welcome_text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+        return
+
+    photo_path = resolve_menu_photo_path()
+    sent_message = await message.answer_photo(
+        photo=FSInputFile(photo_path),
         caption=welcome_text,
         reply_markup=keyboard,
         parse_mode="HTML"
     )
+    if sent_message and sent_message.photo:
+        menu_photo_file_id = sent_message.photo[-1].file_id
+        try:
+            with open(menu_file_id_path, "w", encoding="utf-8") as f:
+                f.write(menu_photo_file_id)
+        except Exception:
+            pass
 
 class AIChatRequest(BaseModel):
     user_id: Optional[int] = None
