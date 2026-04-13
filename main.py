@@ -1,10 +1,10 @@
-﻿import os
+import os
 import asyncio
 import aiomysql
 import httpx
 import json
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
@@ -15,6 +15,14 @@ import ai_service
 from pydantic import BaseModel
 from typing import Optional
 from analysis_engine import compute_analysis_decision
+try:
+    from backend.telegram_auth import get_telegram_user
+except ModuleNotFoundError:
+    from telegram_auth import get_telegram_user
+try:
+    from backend.db_bootstrap import ensure_database_schema
+except ModuleNotFoundError:
+    from db_bootstrap import ensure_database_schema
 
 load_dotenv()
 
@@ -49,6 +57,14 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 db_pool = None
 bot = Bot(token=os.getenv("BOT_TOKEN"))
 dp = Dispatcher()
+menu_photo_file_id = (os.getenv("MENU_PHOTO_FILE_ID") or "").strip()
+menu_file_id_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backend", "media", "menu.file_id")
+if not menu_photo_file_id and os.path.exists(menu_file_id_path):
+    try:
+        with open(menu_file_id_path, "r", encoding="utf-8") as f:
+            menu_photo_file_id = f.read().strip()
+    except Exception:
+        menu_photo_file_id = ""
 
 # --- Р“Р›РћР‘РђР›Р¬РќР«Р• РџР•Р Р•РњР•РќРќР«Р• Р”Р›РЇ Р¤РћРќРћР’РћР“Рћ РћР‘Р РђР‘РћРўР§РРљРђ РЎРР“РќРђР›РћР’ ---
 analysis_queue = asyncio.Queue()
@@ -56,6 +72,24 @@ processing_ids = set()
 price_cache = {} 
 
 COMMODITY_SYMBOLS = ["HG1", "W_1", "C_1", "S_1", "KC1", "CC1", "SB1", "CT1"]
+
+
+def resolve_menu_photo_path() -> str:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(base_dir, "media", "menu.jpg"),
+        os.path.join(base_dir, "media", "menu.png"),
+        os.path.join(base_dir, "backend", "media", "menu.jpg"),
+        os.path.join(base_dir, "backend", "media", "menu.png"),
+        os.path.join("media", "menu.jpg"),
+        os.path.join("media", "menu.png"),
+        os.path.join("backend", "media", "menu.jpg"),
+        os.path.join("backend", "media", "menu.png"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
 
 @app.get("/api/support/links")
 async def get_support_links():
@@ -65,6 +99,17 @@ async def get_support_links():
         "channel_url": channel_url,
         "support_url": support_url
     }
+
+@app.get("/api/webapp/bot-info")
+async def get_webapp_bot_info():
+    bot_username = (os.getenv("BOT_USERNAME") or "").strip().lstrip("@")
+    if not bot_username:
+        try:
+            me = await bot.get_me()
+            bot_username = (me.username or "").strip()
+        except Exception:
+            bot_username = ""
+    return {"bot_username": bot_username}
 
 # --- РҐР•Р›РџР•Р Р« Р”Р›РЇ Р¤РћРќРћР’РћР“Рћ РћР‘Р РђР‘РћРўР§РРљРђ ---
 def parse_timeframe_mins(tf: str) -> int:
@@ -221,9 +266,8 @@ async def analysis_consumer():
 # --- REST API Р­РќР”РџРћРРќРўР« ---
 
 @app.post("/api/user/profile")
-async def get_profile(request: Request):
-    data = await request.json()
-    user_id = data.get("user_id")
+async def get_profile(user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
@@ -237,7 +281,7 @@ async def get_profile(request: Request):
     return user or {"error": "Not found"}
 
 @app.get("/api/indicators")
-async def get_indicators():
+async def get_indicators(user=Depends(get_telegram_user)):
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("SELECT id, name, `key` FROM indicators")
@@ -245,7 +289,8 @@ async def get_indicators():
     return {"indicators": indicators}
 
 @app.get("/api/strategies")
-async def get_strategies(user_id: int):
+async def get_strategies(user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
@@ -264,9 +309,9 @@ async def get_strategies(user_id: int):
     return {"strategies": strategies}
 
 @app.post("/api/user/strategy")
-async def update_strategy(request: Request):
+async def update_strategy(request: Request, user=Depends(get_telegram_user)):
     data = await request.json()
-    user_id = data.get("user_id")
+    user_id = user["user_id"]
     strategy_id = data.get("strategy_id")
     
     async with db_pool.acquire() as conn:
@@ -275,16 +320,16 @@ async def update_strategy(request: Request):
     return {"status": "success", "strategy_id": strategy_id}
 
 @app.post("/api/user/strategy/manage")
-async def manage_custom_strategy(request: Request):
+async def manage_custom_strategy(request: Request, user=Depends(get_telegram_user)):
     data = await request.json()
     action = data.get("action") 
-    user_id = data.get("user_id")
+    user_id = user["user_id"]
     
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
             if action == "create":
                 name = data.get("name")
-                icon = data.get("icon", "вљЎ")
+                icon = data.get("icon", "\u26A1")
                 indicators = data.get("indicators", [])
                 
                 await cur.execute("INSERT INTO presets (name, is_system, icon) VALUES (%s, 0, %s)", (name, icon))
@@ -301,7 +346,7 @@ async def manage_custom_strategy(request: Request):
             elif action == "update":
                 preset_id = data.get("preset_id")
                 name = data.get("name")
-                icon = data.get("icon", "вљЎ")
+                icon = data.get("icon", "\u26A1")
                 indicators = data.get("indicators", [])
                 
                 await cur.execute("UPDATE presets SET name = %s, icon = %s WHERE id = %s AND is_system = 0", (name, icon, preset_id))
@@ -327,8 +372,11 @@ async def manage_custom_strategy(request: Request):
     return {"error": "Invalid action"}
 
 @app.post("/api/user/sync")
-async def sync_user(request: Request):
-    data = await request.json()
+async def sync_user(user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
+    username = user.get("username") or ""
+    first_name = user.get("first_name") or ""
+    avatar_url = user.get("photo_url") or ""
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
@@ -338,13 +386,13 @@ async def sync_user(request: Request):
                     username = VALUES(username),
                     first_name = VALUES(first_name),
                     avatar_url = VALUES(avatar_url)
-            """, (data["user_id"], data["username"], data["first_name"], data.get("avatar_url")))
+            """, (user_id, username, first_name, avatar_url))
     return {"status": "success"}
     
 @app.post("/api/user/mode")
-async def update_mode(request: Request):
+async def update_mode(request: Request, user=Depends(get_telegram_user)):
     data = await request.json()
-    user_id = data.get("user_id")
+    user_id = user["user_id"]
     new_mode = data.get("mode")
     
     if user_id and new_mode:
@@ -355,7 +403,7 @@ async def update_mode(request: Request):
     return {"error": "Invalid data"}
 
 @app.get("/api/pairs/forex")
-async def get_forex_pairs():
+async def get_forex_pairs(user=Depends(get_telegram_user)):
     token = os.getenv("DEVSBITE_TOKEN")
     url = "https://api.devsbite.com/pairs/forex?min_payout=34"
     headers = {
@@ -374,7 +422,7 @@ async def get_forex_pairs():
             return {"error": str(e), "pairs": []}
             
 @app.get("/api/pairs/commodity")
-async def get_commodity_pairs():
+async def get_commodity_pairs(user=Depends(get_telegram_user)):
     token = os.getenv("DEVSBITE_TOKEN")
     url = "https://api.devsbite.com/pairs/commodity"
     headers = {
@@ -391,7 +439,7 @@ async def get_commodity_pairs():
             return [] 
 
 @app.get("/api/pairs/indices")
-async def get_indices_pairs():
+async def get_indices_pairs(user=Depends(get_telegram_user)):
     token = os.getenv("DEVSBITE_TOKEN")
     url = "https://api.devsbite.com/pairs/indices"
     headers = {
@@ -408,7 +456,8 @@ async def get_indices_pairs():
             return []
             
 @app.get("/api/analysis/active")
-async def get_active_analyses(user_id: int):
+async def get_active_analyses(user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
@@ -429,7 +478,8 @@ async def get_active_analyses(user_id: int):
     return {"analyses": analyses}
 
 @app.get("/api/analysis/history")
-async def get_analysis_history(user_id: int):
+async def get_analysis_history(user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
@@ -455,8 +505,7 @@ async def get_analysis_history(user_id: int):
         }
     }
 
-@app.get("/api/news")
-async def get_news():
+async def fetch_news_data():
     token = os.getenv("FINNHUB_TOKEN")
     url = f"https://finnhub.io/api/v1/calendar/economic?token={token}"
     
@@ -481,7 +530,6 @@ async def get_news():
         "EU": "EUR", "DE": "EUR", "FR": "EUR", "IT": "EUR", "ES": "EUR"
     }
 
-    # РњР°РїРїРёРЅРі РјРµС‚Р°Р»Р»РѕРІ Рё СЃС‹СЂСЊСЏ Рє РІР°Р»СЋС‚Р°Рј
     symbol_to_currency_map = {
         "XAU": "USD", "XAG": "USD", "XPT": "USD", "XPD": "USD",
         "WTI": "USD", "BRENT": "USD", "XBR": "USD", "NG": "USD"
@@ -492,10 +540,8 @@ async def get_news():
 
     for event in events:
         try:
-            # РџР°СЂСЃРёРј РІСЂРµРјСЏ UTC
             event_time = datetime.strptime(event["time"], "%Y-%m-%d %H:%M:%S")
             
-            # Р‘РµСЂРµРј РЅРѕРІРѕСЃС‚Рё С‚РѕР»СЊРєРѕ РЅР° СЃРµРіРѕРґРЅСЏ (РѕС‚ -2 С‡Р°СЃРѕРІ РґРѕ РєРѕРЅС†Р° РґРЅСЏ)
             if event_time.date() == now.date() and event_time > (now - timedelta(hours=2)):
                 country = event.get("country", "").strip().upper()
                 currency = country_to_currency.get(country, "ALL")
@@ -506,11 +552,15 @@ async def get_news():
             continue
 
     return {"economicCalendar": filtered_events}
+
+@app.get("/api/news")
+async def get_news(user=Depends(get_telegram_user)):
+    return await fetch_news_data()
     
 @app.post("/api/analysis/forex")
-async def create_forex_analysis(request: Request):
+async def create_forex_analysis(request: Request, user=Depends(get_telegram_user)):
     data = await request.json()
-    user_id = data.get("user_id")
+    user_id = user["user_id"]
     pair = data.get("pair")
     interval_raw = data.get("exp")
     strategy_id = data.get("strategy_id")
@@ -568,7 +618,7 @@ async def create_forex_analysis(request: Request):
                 interval=interval,
                 allowed_indicators=allowed_indicators,
             )
-            news_data = await get_news()
+            news_data = await fetch_news_data()
         except httpx.HTTPStatusError as e:
             error_text = e.response.text
             print(f"ANALYSIS GATEWAY ERROR [{e.response.status_code}]: {error_text} (Payload: {payload})")
@@ -591,11 +641,11 @@ async def create_forex_analysis(request: Request):
 
     return {"status": "success", "analysis_id": analysis_id, "data": analysis_data, "news_data": news_data}
 @app.post("/api/analysis/status")
-async def update_analysis_status(request: Request):
+async def update_analysis_status(request: Request, user=Depends(get_telegram_user)):
     data = await request.json()
     analysis_id = data.get("analysis_id")
     status = data.get("status") 
-    user_id = data.get("user_id")
+    user_id = user["user_id"]
 
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -608,11 +658,12 @@ async def update_analysis_status(request: Request):
     
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
+    global menu_photo_file_id
     user_name = message.from_user.first_name or message.from_user.username or "Trader"
-    
+
     welcome_text = (
-        f"Welcome, {user_name}! рџ‘‹\n\n"
-        f"<b>Elizabeth Vane</b> | <code>Private Trading Analytics</code>\n\n"
+        f"Welcome, {user_name}!\n\n"
+        f"<b>Eric Cole</b> | <code>Private Trading Analytics</code>\n\n"
         f"A professional analytical space for those who value precision. "
         f"We've combined advanced technical analysis methods with the convenience of a Web App.\n\n"
         f"<i>Your market edge begins here.</i>"
@@ -621,43 +672,56 @@ async def cmd_start(message: types.Message):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text="рџ‘‰ Open Elizabeth Vane вњЁ", 
+                text="Open Eric Cole",
                 web_app=WebAppInfo(url=os.getenv("WEB_APP_URL"))
             )
         ]
     ])
-    
-    photo_path = "media/menu.jpg"
-    photo = FSInputFile(photo_path)
-    
-    await message.answer_photo(
-        photo=photo,
+
+    if menu_photo_file_id:
+        await message.answer_photo(
+            photo=menu_photo_file_id,
+            caption=welcome_text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+        return
+
+    photo_path = resolve_menu_photo_path()
+    sent_message = await message.answer_photo(
+        photo=FSInputFile(photo_path),
         caption=welcome_text,
         reply_markup=keyboard,
         parse_mode="HTML"
     )
+    if sent_message and sent_message.photo:
+        menu_photo_file_id = sent_message.photo[-1].file_id
+        try:
+            with open(menu_file_id_path, "w", encoding="utf-8") as f:
+                f.write(menu_photo_file_id)
+        except Exception:
+            pass
 
 class AIChatRequest(BaseModel):
-    user_id: int
+    user_id: Optional[int] = None
     text: Optional[str] = None
     chat_id: Optional[int] = None
 
-@app.post("/api/ai/chat/active")
-async def get_or_create_active_chat(request: AIChatRequest):
+async def get_or_create_active_chat_for_user(user_id: int):
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
-                SELECT id, title, message_count 
+                SELECT id, title
                 FROM ai_chats 
                 WHERE user_id = %s AND status = 'active' 
                 AND updated_at >= NOW() - INTERVAL 24 HOUR
                 ORDER BY updated_at DESC LIMIT 1
-            """, (request.user_id,))
+            """, (user_id,))
             chat = await cur.fetchone()
 
             if not chat:
-                await cur.execute("UPDATE ai_chats SET status = 'archived' WHERE user_id = %s AND status = 'active'", (request.user_id,))
-                await cur.execute("INSERT INTO ai_chats (user_id) VALUES (%s)", (request.user_id,))
+                await cur.execute("UPDATE ai_chats SET status = 'archived' WHERE user_id = %s AND status = 'active'", (user_id,))
+                await cur.execute("INSERT INTO ai_chats (user_id) VALUES (%s)", (user_id,))
                 chat_id = cur.lastrowid
                 return {"status": "success", "chat_id": chat_id, "title": "РќРѕРІС‹Р№ РґРёР°Р»РѕРі", "messages": []}
 
@@ -666,15 +730,24 @@ async def get_or_create_active_chat(request: AIChatRequest):
             
             return {"status": "success", "chat_id": chat['id'], "title": chat['title'], "messages": messages}
 
+@app.post("/api/ai/chat/active")
+async def get_or_create_active_chat(request: AIChatRequest, user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
+    return await get_or_create_active_chat_for_user(user_id)
+
 @app.post("/api/ai/chat/send")
-async def send_chat_message(request: AIChatRequest):
+async def send_chat_message(request: AIChatRequest, user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     if not request.text or not request.chat_id:
         return {"error": "РќРµРѕР±С…РѕРґРёРј text Рё chat_id"}
-    result = await ai_service.process_user_message(db_pool, request.user_id, request.chat_id, request.text)
+    result = await ai_service.process_user_message(db_pool, user_id, request.chat_id, request.text)
+    if result.get("status") != "success":
+        raise HTTPException(status_code=502, detail=result.get("error") or "AI provider request failed")
     return result
 
 @app.post("/api/ai/chat/history")
-async def get_chat_history(request: AIChatRequest):
+async def get_chat_history(request: AIChatRequest, user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
@@ -683,26 +756,28 @@ async def get_chat_history(request: AIChatRequest):
                 WHERE user_id = %s 
                 ORDER BY updated_at DESC 
                 LIMIT 10
-            """, (request.user_id,))
+            """, (user_id,))
             chats = await cur.fetchall()
     return {"status": "success", "chats": chats}
 
 @app.post("/api/ai/chat/load")
-async def load_historical_chat(request: AIChatRequest):
+async def load_historical_chat(request: AIChatRequest, user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     if not request.chat_id:
         return {"error": "РќРµРѕР±С…РѕРґРёРј chat_id"}
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("UPDATE ai_chats SET status = 'archived' WHERE user_id = %s AND status = 'active'", (request.user_id,))
-            await cur.execute("UPDATE ai_chats SET status = 'active', updated_at = NOW() WHERE id = %s AND user_id = %s", (request.chat_id, request.user_id))
-    return await get_or_create_active_chat(request)
+            await cur.execute("UPDATE ai_chats SET status = 'archived' WHERE user_id = %s AND status = 'active'", (user_id,))
+            await cur.execute("UPDATE ai_chats SET status = 'active', updated_at = NOW() WHERE id = %s AND user_id = %s", (request.chat_id, user_id))
+    return await get_or_create_active_chat_for_user(user_id)
 
 @app.post("/api/ai/chat/new")
-async def create_new_chat(request: AIChatRequest):
+async def create_new_chat(request: AIChatRequest, user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("UPDATE ai_chats SET status = 'archived' WHERE user_id = %s AND status = 'active'", (request.user_id,))
-            await cur.execute("INSERT INTO ai_chats (user_id) VALUES (%s)", (request.user_id,))
+            await cur.execute("UPDATE ai_chats SET status = 'archived' WHERE user_id = %s AND status = 'active'", (user_id,))
+            await cur.execute("INSERT INTO ai_chats (user_id) VALUES (%s)", (user_id,))
             chat_id = cur.lastrowid
     return {"status": "success", "chat_id": chat_id, "title": "РќРѕРІС‹Р№ РґРёР°Р»РѕРі", "messages": []}
     
@@ -717,6 +792,7 @@ async def start_api():
 async def main():
     global db_pool
     db_pool = await aiomysql.create_pool(**DB_CONFIG)
+    await ensure_database_schema(db_pool)
     
     await asyncio.gather(
         start_bot(), 

@@ -1,16 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
+import { apiFetchJson } from '../../lib/api';
 import './Profile.css';
 import iconEdit from '../../assets/icons/edit.svg?url';
 import avatarImg from '../../assets/eric-avatar.jpg'; 
 
 const ICON_CHOICES = [
-  '📈', '📉', '📊', '💰', '💵', '🪙', '🏦', '💎',
-  '🐂', '🐻', '🐋', '🦅', '🐺', '🦁', '🦈', '🐍',
-  '⚡', '🔥', '🚀', '💥', '🌪️', '🌊', '🌋', '☄️',
-  '🤖', '🧠', '⚙️', '📡', '🔋', '💻', '🧬', '🔬',
-  '🎯', '🛡️', '⚔️', '🔍', '🧭', '⚖️', '⏱️', '🔑', '💡', '🧿',
-  '🔮', '👑', '🏆', '🥇', '🌟', '✨', '💫', '👁️',
-  '🟢', '🔴', '🔵', '🟣', '♾️', '💠', '🔆', '〽️'
+  '\uD83D\uDCC8', '\uD83D\uDCC9', '\uD83D\uDCCA', '\uD83D\uDCB0', '\uD83D\uDCB5', '\uD83E\uDE99', '\uD83C\uDFE6', '\uD83D\uDC8E',
+  '\uD83D\uDC02', '\uD83D\uDC3B', '\uD83D\uDC0B', '\uD83E\uDD85', '\uD83D\uDC3A', '\uD83E\uDD81', '\uD83E\uDD80', '\uD83D\uDC0D',
+  '\u26A1', '\uD83D\uDD25', '\uD83D\uDE80', '\uD83D\uDCA5', '\uD83C\uDF2A\uFE0F', '\uD83C\uDF0A', '\uD83C\uDF0B', '\u2604\uFE0F',
+  '\uD83E\uDD16', '\uD83E\uDDE0', '\u2699\uFE0F', '\uD83D\uDCE1', '\uD83D\uDD0B', '\uD83D\uDCBB', '\uD83E\uDDEC', '\uD83D\uDD2C',
+  '\uD83C\uDFAF', '\uD83D\uDEE1\uFE0F', '\u2694\uFE0F', '\uD83D\uDD0C', '\uD83E\uDDED', '\u2696\uFE0F', '\u23F1\uFE0F', '\uD83D\uDD11', '\uD83D\uDCA1', '\uD83E\uDDEF',
+  '\uD83D\uDD2E', '\uD83C\uDF93', '\uD83C\uDFC6', '\uD83E\uDD47', '\uD83C\uDF1F', '\u2728', '\uD83D\uDCAB', '\uD83D\uDC41\uFE0F',
+  '\uD83D\uDFE2', '\uD83D\uDD34', '\uD83D\uDD35', '\uD83D\uDFE3', '\u267E\uFE0F', '\uD83D\uDCA0', '\uD83D\uDD06', '\u303D\uFE0F'
 ];
 
 export default function Profile({
@@ -22,7 +23,7 @@ export default function Profile({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isIconDropdownOpen, setIsIconDropdownOpen] = useState(false); 
   const [editPresetId, setEditPresetId] = useState(null);
-  const [formData, setFormData] = useState({ name: '', indicators: [], icon: '⚡' });
+  const [formData, setFormData] = useState({ name: '', indicators: [], icon: '\u26A1' });
   const [clickCount, setClickCount] = useState(0);
 
   useEffect(() => {
@@ -44,7 +45,7 @@ export default function Profile({
 
   const openCreateModal = () => {
     setEditPresetId(null);
-    setFormData({ name: '', indicators: [], icon: '⚡' });
+    setFormData({ name: '', indicators: [], icon: '\u26A1' });
     setIsIconDropdownOpen(false);
     setIsModalOpen(true);
   };
@@ -52,7 +53,7 @@ export default function Profile({
   const openEditModal = (strat) => {
     setEditPresetId(strat.id);
     const selectedIds = strat.indicator_ids ? strat.indicator_ids.split(',').map(Number) : [];
-    setFormData({ name: strat.name, indicators: selectedIds, icon: strat.icon || '⚡' });
+    setFormData({ name: strat.name, indicators: selectedIds, icon: strat.icon || '\u26A1' });
     setIsIconDropdownOpen(false);
     setIsModalOpen(true);
   };
@@ -60,7 +61,7 @@ export default function Profile({
   const closeAndResetModal = () => {
     setIsModalOpen(false);
     setIsIconDropdownOpen(false);
-    setFormData({ name: '', indicators: [], icon: '⚡' });
+    setFormData({ name: '', indicators: [], icon: '\u26A1' });
     setEditPresetId(null);
   };
 
@@ -81,7 +82,6 @@ export default function Profile({
     const action = editPresetId ? 'update' : 'create';
     const payload = {
       action,
-      user_id: user.user_id,
       name: formData.name,
       icon: formData.icon, 
       indicators: formData.indicators
@@ -90,17 +90,13 @@ export default function Profile({
     if (editPresetId) payload.preset_id = editPresetId;
 
     try {
-      const res = await fetch('/api/user/strategy/manage', {
+      await apiFetchJson('/api/user/strategy/manage', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-
-      if (res.ok) {
-        setToastMessage(t.profile.actionSuccess);
-        closeAndResetModal();
-        onRefreshStrategies();
-      }
+      setToastMessage(t.profile.actionSuccess);
+      closeAndResetModal();
+      onRefreshStrategies();
     } catch (e) {
       console.error(e);
     }
@@ -110,17 +106,13 @@ export default function Profile({
     if (!editPresetId) return;
 
     try {
-      const res = await fetch('/api/user/strategy/manage', {
+      await apiFetchJson('/api/user/strategy/manage', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'delete', user_id: user.user_id, preset_id: editPresetId })
+        body: JSON.stringify({ action: 'delete', preset_id: editPresetId })
       });
-
-      if (res.ok) {
-        setToastMessage(t.profile.actionSuccess);
-        closeAndResetModal();
-        onRefreshStrategies();
-      }
+      setToastMessage(t.profile.actionSuccess);
+      closeAndResetModal();
+      onRefreshStrategies();
     } catch (e) {
       console.error(e);
     }
@@ -233,7 +225,7 @@ export default function Profile({
                 className={`strategy-card ${user.strategy_id === strat.id ? 'active' : ''}`}
                 onClick={() => onUpdateStrategy(strat.id)}
               >
-                <div className="strategy-icon">{strat.icon || '⚡'}</div>
+                <div className="strategy-icon">{strat.icon || '\u26A1'}</div>
                 <div className="strategy-name-text">{strat.name}</div>
               </div>
             ))}
@@ -250,7 +242,7 @@ export default function Profile({
             <div className="custom-strategies-list">
               {myStrategies.map((strat) => (
                 <div key={strat.id} className={`custom-strategy-item ${user.strategy_id === strat.id ? 'active' : ''}`}>
-                  <div className="custom-strat-icon-wrapper">{strat.icon || '📝'}</div>
+                  <div className="custom-strat-icon-wrapper">{strat.icon || '\uD83D\uDCDD'}</div>
                   <div className="custom-strat-info" onClick={() => onUpdateStrategy(strat.id)}>
                     <span className="strat-name">{strat.name}</span>
                     <span className="strat-indicators">{strat.indicators_list}</span>
@@ -280,7 +272,7 @@ export default function Profile({
                 onClick={() => setIsIconDropdownOpen(!isIconDropdownOpen)}
               >
                 <span className="selected-icon-display">{formData.icon}</span>
-                <span className={`dropdown-arrow ${isIconDropdownOpen ? 'open' : ''}`}>▼</span>
+                <span className={`dropdown-arrow ${isIconDropdownOpen ? 'open' : ''}`}>{'\u25BE'}</span>
               </div>
               
               {isIconDropdownOpen && (
@@ -340,6 +332,7 @@ export default function Profile({
     </div>
   );
 }
+
 
 
 

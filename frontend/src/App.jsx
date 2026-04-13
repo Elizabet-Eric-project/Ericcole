@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { initTelegramApp } from './lib/tgSetup';
+import { apiFetchJson, isTelegramWebAppAvailable } from './lib/api';
 
 import Loader from './components/Loader/Loader';
 import BinaryHome from './components/binary/BinaryHome';
@@ -16,14 +17,18 @@ import ChatAI from './components/pages/ChatAI';
 import FAQ from './components/pages/FAQ';
 import Support from './components/pages/Support';
 import LogAnalysis from './components/pages/LogAnalysis';
+import OpenViaBot from './components/pages/OpenViaBot';
 
 import Header from './components/Header/Header.jsx';
 import BackgroundCandles from './components/BackgroundCandles/BackgroundCandles.jsx';
 import { texts } from './locales/texts';
 import './theme.css';
+import './openViaBot.css';
 
 function App() {
   const [user, setUser] = useState(null);
+  const [isTgWebApp, setIsTgWebApp] = useState(true);
+  const [botUsername, setBotUsername] = useState('');
   const [currentPage, setCurrentPage] = useState('');
   const [toastMessage, setToastMessage] = useState(null);
   const [strategies, setStrategies] = useState([]);
@@ -44,55 +49,44 @@ function App() {
 
   useEffect(() => {
     const syncUser = async () => {
+      const available = isTelegramWebAppAvailable();
+      if (!available) {
+        setIsTgWebApp(false);
+        try {
+          const info = await apiFetchJson('/api/webapp/bot-info');
+          setBotUsername(info?.bot_username || '');
+        } catch (error) {
+          setBotUsername('');
+        }
+        return;
+      }
+
       try {
         const tg = await initTelegramApp();
         if (!tg) return;
 
-        const tgUser = tg.initDataUnsafe?.user;
-        if (!tgUser) return;
+        setIsTgWebApp(true);
 
-        await fetch('/api/user/sync', {
+        await apiFetchJson('/api/user/sync', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: tgUser.id,
-            username: tgUser.username || '',
-            first_name: tgUser.first_name || '',
-            avatar_url: tgUser.photo_url || ''
-          })
         });
 
-        const resProfile = fetch('/api/user/profile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: tgUser.id })
-        });
+        const [userData, stratData, indData] = await Promise.all([
+          apiFetchJson('/api/user/profile', {
+            method: 'POST',
+          }),
+          apiFetchJson('/api/strategies'),
+          apiFetchJson('/api/indicators')
+        ]);
 
-        const resStrats = fetch(`/api/strategies?user_id=${tgUser.id}`);
-        const resInd = fetch('/api/indicators');
-
-        const [res, stratRes, indRes] = await Promise.all([resProfile, resStrats, resInd]);
-
-        if (indRes.ok) {
-          const indData = await indRes.json();
-          setAllIndicators(indData.indicators || []);
-        }
-
-        if (stratRes.ok) {
-          const stratData = await stratRes.json();
-          setStrategies(stratData.strategies || []);
-        }
-
-        if (res.ok) {
-          const userData = await res.json();
-          if (!userData.user_id) userData.user_id = tgUser.id;
-          setUser(userData);
-          
-          if (userData.mode === 'demo') {
-            setCurrentPage('demoHome');
-          } else {
-            setCurrentPage(userData.mode === 'binary' ? 'signals' : 'analysis');
-          }
+        setAllIndicators(indData.indicators || []);
+        setStrategies(stratData.strategies || []);
+        setUser(userData);
+        
+        if (userData.mode === 'demo') {
+          setCurrentPage('demoHome');
+        } else {
+          setCurrentPage(userData.mode === 'binary' ? 'signals' : 'analysis');
         }
       } catch (error) {
         const fallbackUser = { mode: 'binary', strategy_id: 1, lang: 'en' };
@@ -230,6 +224,7 @@ function App() {
   const isChatPage = currentPage === 'chatAI';
   const bottomPadding = isChatPage ? 86 : 106;
 
+  if (!isTgWebApp) return <OpenViaBot botUsername={botUsername} />;
   if (!user) return <Loader t={t} />;
 
   const handlePageChange = (newPage) => {
@@ -258,12 +253,11 @@ function App() {
 
     setToastMessage(`${t.profile.modeChangedSuccess} ${modeName}`);
 
-    if (user.user_id) {
+    if (user) {
       try {
-        await fetch('/api/user/mode', {
+        await apiFetchJson('/api/user/mode', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: user.user_id, mode: newMode })
+          body: JSON.stringify({ mode: newMode })
         });
       } catch (error) {}
     }
@@ -282,32 +276,24 @@ function App() {
     setToastMessage(t.profile.strategyChangedSuccess);
 
     try {
-      await fetch('/api/user/strategy', {
+      await apiFetchJson('/api/user/strategy', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.user_id, strategy_id: strategyId })
+        body: JSON.stringify({ strategy_id: strategyId })
       });
     } catch (error) {}
   };
 
   const refreshStrategies = async () => {
-    if (!user || !user.user_id) return;
+    if (!user) return;
 
     try {
-      const stratRes = await fetch(`/api/strategies?user_id=${user.user_id}`);
-      const stratData = await stratRes.json();
+      const stratData = await apiFetchJson('/api/strategies');
       setStrategies(stratData.strategies || []);
 
-      const userRes = await fetch('/api/user/profile', {
+      const updatedUser = await apiFetchJson('/api/user/profile', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.user_id })
       });
-
-      if (userRes.ok) {
-        const updatedUser = await userRes.json();
-        setUser((prev) => ({ ...prev, strategy_id: updatedUser.strategy_id }));
-      }
+      setUser((prev) => ({ ...prev, strategy_id: updatedUser.strategy_id }));
     } catch (e) {}
   };
 
