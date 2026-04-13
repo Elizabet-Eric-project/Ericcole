@@ -22,7 +22,7 @@ export default function SettingsPage({ adminUser }) {
       setSystemPrompt(ai.system_prompt || '');
       setAdmins(adminsRes.admins || []);
     } catch (e) {
-      setError(e.message || 'Failed to load settings');
+      setError(e.message || 'Не удалось загрузить настройки');
     }
   }, []);
 
@@ -44,9 +44,9 @@ export default function SettingsPage({ adminUser }) {
           },
         }),
       });
-      setStatus('Settings saved');
+      setStatus('Настройки сохранены');
     } catch (e) {
-      setError(e.message || 'Failed to save settings');
+      setError(e.message || 'Не удалось сохранить настройки');
     } finally {
       setSaving(false);
     }
@@ -65,10 +65,10 @@ export default function SettingsPage({ adminUser }) {
         body: JSON.stringify({ user_id: userId }),
       });
       setGrantId('');
-      setStatus(`Admin access granted: ${userId}`);
+      setStatus(`Админка выдана: ${userId}`);
       await loadAll();
     } catch (e) {
-      setError(e.message || 'Failed to grant admin');
+      setError(e.message || 'Не удалось выдать админку');
     }
   };
 
@@ -81,23 +81,23 @@ export default function SettingsPage({ adminUser }) {
         method: 'POST',
         body: JSON.stringify({ user_id: userId }),
       });
-      setStatus(`Admin access revoked: ${userId}`);
+      setStatus(`Админка снята: ${userId}`);
       await loadAll();
     } catch (e) {
-      setError(e.message || 'Failed to revoke admin');
+      setError(e.message || 'Не удалось снять админку');
     }
   };
 
   return (
     <div className="admin-grid">
       <div className="admin-card">
-        <h3 className="admin-section-title">AI settings</h3>
+        <h3 className="admin-section-title">AI настройки</h3>
         <div className="admin-field">
-          <label className="admin-label">Model</label>
+          <label className="admin-label">Модель</label>
           <input className="admin-input" value={model} onChange={(e) => setModel(e.target.value)} />
         </div>
         <div className="admin-field">
-          <label className="admin-label">System prompt</label>
+          <label className="admin-label">Системный промпт</label>
           <textarea
             className="admin-textarea"
             rows={8}
@@ -106,40 +106,40 @@ export default function SettingsPage({ adminUser }) {
           />
         </div>
         <button className="admin-btn" onClick={saveSettings} disabled={saving}>
-          {saving ? 'Saving...' : 'Save settings'}
+          {saving ? 'Сохранение...' : 'Сохранить настройки'}
         </button>
       </div>
 
       <div className="admin-card">
-        <h3 className="admin-section-title">Grant admin access</h3>
+        <h3 className="admin-section-title">Выдать админку</h3>
         <div className="admin-inline-form">
           <input
             className="admin-input"
             inputMode="numeric"
-            placeholder="Enter user_id"
+            placeholder="Введите user_id"
             value={grantId}
             onChange={(e) => setGrantId(e.target.value.replace(/\D/g, ''))}
           />
-          <button className="admin-btn" onClick={grantAdmin}>Grant</button>
+          <button className="admin-btn" onClick={grantAdmin}>Выдать</button>
         </div>
 
-        <h4 className="admin-subtitle">Current admins</h4>
+        <h4 className="admin-subtitle">Текущие админы</h4>
         <div className="admin-list">
           {admins.map((item) => (
             <div className="admin-list-row" key={item.user_id}>
               <span>
-                {item.first_name || item.username || 'Admin'} | {item.user_id}
+                {item.first_name || item.username || 'Админ'} | {item.user_id}
               </span>
               <button
                 className="admin-btn-outline"
                 disabled={Number(item.user_id) === Number(adminUser?.user_id)}
                 onClick={() => revokeAdmin(item.user_id)}
               >
-                Revoke
+                Забрать
               </button>
             </div>
           ))}
-          {admins.length === 0 ? <div className="admin-muted">No admins in list</div> : null}
+          {admins.length === 0 ? <div className="admin-muted">Список админов пуст</div> : null}
         </div>
       </div>
 

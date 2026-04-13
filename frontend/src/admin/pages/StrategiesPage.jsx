@@ -12,7 +12,7 @@ export default function StrategiesPage() {
       const res = await apiAdminFetchJson('/api/admin/strategies');
       setItems(res.strategies || []);
     } catch (e) {
-      setError(e.message || 'Failed to load strategies');
+      setError(e.message || 'Не удалось загрузить стратегии');
     }
   }, []);
 
@@ -38,10 +38,10 @@ export default function StrategiesPage() {
           is_system: Number(item.is_system) === 1,
         }),
       });
-      setStatus(`Strategy ${item.id} saved`);
+      setStatus(`Стратегия ${item.id} сохранена`);
       await load();
     } catch (e) {
-      setError(e.message || 'Failed to save strategy');
+      setError(e.message || 'Не удалось сохранить стратегию');
     }
   };
 
@@ -53,16 +53,16 @@ export default function StrategiesPage() {
         method: 'POST',
         body: JSON.stringify({ id }),
       });
-      setStatus(`Strategy ${id} deleted`);
+      setStatus(`Стратегия ${id} удалена`);
       await load();
     } catch (e) {
-      setError(e.message || 'Failed to delete strategy');
+      setError(e.message || 'Не удалось удалить стратегию');
     }
   };
 
   return (
     <div className="admin-card">
-      <h3 className="admin-section-title">Strategies</h3>
+      <h3 className="admin-section-title">Стратегии</h3>
       {error ? <div className="admin-error">{error}</div> : null}
       {status ? <div className="admin-success">{status}</div> : null}
 
@@ -71,11 +71,11 @@ export default function StrategiesPage() {
           <thead>
             <tr>
               <th>ID</th>
-              <th>Name</th>
-              <th>Icon</th>
-              <th>Timeframes</th>
-              <th>System</th>
-              <th>Usage</th>
+              <th>Название</th>
+              <th>Иконка</th>
+              <th>Таймфреймы</th>
+              <th>Системная</th>
+              <th>Используют</th>
               <th></th>
             </tr>
           </thead>
@@ -114,9 +114,9 @@ export default function StrategiesPage() {
                 <td>{item.usage_count || 0}</td>
                 <td>
                   <div className="admin-row-actions">
-                    <button className="admin-btn-outline" onClick={() => save(item)}>Save</button>
+                    <button className="admin-btn-outline" onClick={() => save(item)}>Сохранить</button>
                     {Number(item.id) !== 1 ? (
-                      <button className="admin-btn-outline danger" onClick={() => remove(item.id)}>Delete</button>
+                      <button className="admin-btn-outline danger" onClick={() => remove(item.id)}>Удалить</button>
                     ) : null}
                   </div>
                 </td>
@@ -124,7 +124,7 @@ export default function StrategiesPage() {
             ))}
             {items.length === 0 ? (
               <tr>
-                <td colSpan={7} className="admin-muted">No strategies</td>
+                <td colSpan={7} className="admin-muted">Нет стратегий</td>
               </tr>
             ) : null}
           </tbody>

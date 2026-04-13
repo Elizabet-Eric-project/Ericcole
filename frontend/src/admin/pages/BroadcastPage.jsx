@@ -23,7 +23,7 @@ export default function BroadcastPage() {
       setResult(res.result || null);
       setText('');
     } catch (e) {
-      setError(e.message || 'Failed to send broadcast');
+      setError(e.message || 'Не удалось отправить рассылку');
     } finally {
       setLoading(false);
     }
@@ -31,27 +31,27 @@ export default function BroadcastPage() {
 
   return (
     <div className="admin-card">
-      <h3 className="admin-section-title">Broadcast</h3>
+      <h3 className="admin-section-title">Рассылка</h3>
       <textarea
         className="admin-textarea"
         rows={8}
-        placeholder="Write a message for all users..."
+        placeholder="Напишите сообщение для всех пользователей..."
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
       <div className="admin-row-between">
-        <div className="admin-muted">The message will be sent to every user from the users table.</div>
+        <div className="admin-muted">Сообщение отправится всем пользователям из таблицы users.</div>
         <button className="admin-btn" onClick={handleSend} disabled={loading || !text.trim()}>
-          {loading ? 'Sending...' : 'Start broadcast'}
+          {loading ? 'Отправка...' : 'Запустить рассылку'}
         </button>
       </div>
 
       {error ? <div className="admin-error">{error}</div> : null}
       {result ? (
         <div className="admin-result">
-          <div>Total: <strong>{result.total}</strong></div>
-          <div>Sent: <strong>{result.sent}</strong></div>
-          <div>Failed: <strong>{result.failed}</strong></div>
+          <div>Всего: <strong>{result.total}</strong></div>
+          <div>Отправлено: <strong>{result.sent}</strong></div>
+          <div>Ошибок: <strong>{result.failed}</strong></div>
         </div>
       ) : null}
     </div>

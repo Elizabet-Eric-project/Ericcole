@@ -7,11 +7,11 @@ import StrategiesPage from './pages/StrategiesPage';
 import './admin.css';
 
 const TABS = [
-  { id: 'stats', label: 'Statistics' },
-  { id: 'users', label: 'Users' },
-  { id: 'broadcast', label: 'Broadcast' },
-  { id: 'settings', label: 'Settings' },
-  { id: 'strategies', label: 'Strategies' },
+  { id: 'stats', label: 'Статистика' },
+  { id: 'users', label: 'Пользователи' },
+  { id: 'broadcast', label: 'Рассылка' },
+  { id: 'settings', label: 'Настройки' },
+  { id: 'strategies', label: 'Стратегии' },
 ];
 
 export default function AdminApp({ adminUser, authError }) {
@@ -19,14 +19,14 @@ export default function AdminApp({ adminUser, authError }) {
 
   const title = useMemo(() => {
     const tab = TABS.find((item) => item.id === activeTab);
-    return tab ? tab.label : 'Admin Panel';
+    return tab ? tab.label : 'Админ-панель';
   }, [activeTab]);
 
   if (authError) {
     return (
       <div className="admin-shell">
         <div className="admin-card">
-          <h2 className="admin-title">Access denied</h2>
+          <h2 className="admin-title">Доступ запрещен</h2>
           <p className="admin-muted">{authError}</p>
         </div>
       </div>
@@ -37,10 +37,10 @@ export default function AdminApp({ adminUser, authError }) {
     <div className="admin-shell">
       <header className="admin-topbar admin-card">
         <div>
-          <div className="admin-badge">Admin Center</div>
+          <div className="admin-badge">Админ-центр</div>
           <h1 className="admin-title">{title}</h1>
           <div className="admin-muted">
-            {adminUser?.first_name || adminUser?.username || 'Admin'} | ID {adminUser?.user_id || '-'}
+            {adminUser?.first_name || adminUser?.username || 'Админ'} | ID {adminUser?.user_id || '-'}
           </div>
         </div>
       </header>
