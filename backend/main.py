@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request, Depends, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
-from aiogram.types import WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, BotCommand
 from dotenv import load_dotenv
 import uvicorn
 import ai_service
@@ -2035,6 +2035,17 @@ async def create_new_chat(request: AIChatRequest, user=Depends(get_telegram_user
     return {"status": "success", "chat_id": chat_id, "title": "New Chat", "messages": []}
     
 async def start_bot():
+    try:
+        await bot.set_my_commands(
+            [
+                BotCommand(
+                    command="start",
+                    description="Open main menu",
+                )
+            ]
+        )
+    except Exception as e:
+        print(f"[Bot] set_my_commands error: {e}")
     await dp.start_polling(bot)
 
 async def start_api():
