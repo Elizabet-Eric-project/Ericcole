@@ -70,6 +70,17 @@ async def get_support_links():
         "support_url": support_url
     }
 
+@app.get("/api/webapp/bot-info")
+async def get_webapp_bot_info():
+    bot_username = (os.getenv("BOT_USERNAME") or "").strip().lstrip("@")
+    if not bot_username:
+        try:
+            me = await bot.get_me()
+            bot_username = (me.username or "").strip()
+        except Exception:
+            bot_username = ""
+    return {"bot_username": bot_username}
+
 # --- РҐР•Р›РџР•Р Р« Р”Р›РЇ Р¤РћРќРћР’РћР“Рћ РћР‘Р РђР‘РћРўР§РРљРђ ---
 def parse_timeframe_mins(tf: str) -> int:
     if not tf: return 5
@@ -225,9 +236,8 @@ async def analysis_consumer():
 # --- REST API Р­РќР”РџРћРРќРўР« ---
 
 @app.post("/api/user/profile")
-async def get_profile(request: Request):
-    data = await request.json()
-    user_id = data.get("user_id")
+async def get_profile(user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
@@ -241,7 +251,7 @@ async def get_profile(request: Request):
     return user or {"error": "Not found"}
 
 @app.get("/api/indicators")
-async def get_indicators():
+async def get_indicators(user=Depends(get_telegram_user)):
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("SELECT id, name, `key` FROM indicators")
@@ -249,7 +259,8 @@ async def get_indicators():
     return {"indicators": indicators}
 
 @app.get("/api/strategies")
-async def get_strategies(user_id: int):
+async def get_strategies(user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
@@ -268,9 +279,9 @@ async def get_strategies(user_id: int):
     return {"strategies": strategies}
 
 @app.post("/api/user/strategy")
-async def update_strategy(request: Request):
+async def update_strategy(request: Request, user=Depends(get_telegram_user)):
     data = await request.json()
-    user_id = data.get("user_id")
+    user_id = user["user_id"]
     strategy_id = data.get("strategy_id")
     
     async with db_pool.acquire() as conn:
@@ -279,16 +290,16 @@ async def update_strategy(request: Request):
     return {"status": "success", "strategy_id": strategy_id}
 
 @app.post("/api/user/strategy/manage")
-async def manage_custom_strategy(request: Request):
+async def manage_custom_strategy(request: Request, user=Depends(get_telegram_user)):
     data = await request.json()
     action = data.get("action") 
-    user_id = data.get("user_id")
+    user_id = user["user_id"]
     
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
             if action == "create":
                 name = data.get("name")
-                icon = data.get("icon", "вљЎ")
+                icon = data.get("icon", "\u26A1")
                 indicators = data.get("indicators", [])
                 
                 await cur.execute("INSERT INTO presets (name, is_system, icon) VALUES (%s, 0, %s)", (name, icon))
@@ -305,7 +316,7 @@ async def manage_custom_strategy(request: Request):
             elif action == "update":
                 preset_id = data.get("preset_id")
                 name = data.get("name")
-                icon = data.get("icon", "вљЎ")
+                icon = data.get("icon", "\u26A1")
                 indicators = data.get("indicators", [])
                 
                 await cur.execute("UPDATE presets SET name = %s, icon = %s WHERE id = %s AND is_system = 0", (name, icon, preset_id))
@@ -331,8 +342,11 @@ async def manage_custom_strategy(request: Request):
     return {"error": "Invalid action"}
 
 @app.post("/api/user/sync")
-async def sync_user(request: Request):
-    data = await request.json()
+async def sync_user(user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
+    username = user.get("username") or ""
+    first_name = user.get("first_name") or ""
+    avatar_url = user.get("photo_url") or ""
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
@@ -342,13 +356,13 @@ async def sync_user(request: Request):
                     username = VALUES(username),
                     first_name = VALUES(first_name),
                     avatar_url = VALUES(avatar_url)
-            """, (data["user_id"], data["username"], data["first_name"], data.get("avatar_url")))
+            """, (user_id, username, first_name, avatar_url))
     return {"status": "success"}
     
 @app.post("/api/user/mode")
-async def update_mode(request: Request):
+async def update_mode(request: Request, user=Depends(get_telegram_user)):
     data = await request.json()
-    user_id = data.get("user_id")
+    user_id = user["user_id"]
     new_mode = data.get("mode")
     
     if user_id and new_mode:
@@ -359,7 +373,7 @@ async def update_mode(request: Request):
     return {"error": "Invalid data"}
 
 @app.get("/api/pairs/forex")
-async def get_forex_pairs():
+async def get_forex_pairs(user=Depends(get_telegram_user)):
     token = os.getenv("DEVSBITE_TOKEN")
     url = "https://api.devsbite.com/pairs/forex?min_payout=34"
     headers = {
@@ -378,7 +392,7 @@ async def get_forex_pairs():
             return {"error": str(e), "pairs": []}
             
 @app.get("/api/pairs/commodity")
-async def get_commodity_pairs():
+async def get_commodity_pairs(user=Depends(get_telegram_user)):
     token = os.getenv("DEVSBITE_TOKEN")
     url = "https://api.devsbite.com/pairs/commodity"
     headers = {
@@ -395,7 +409,7 @@ async def get_commodity_pairs():
             return [] 
 
 @app.get("/api/pairs/indices")
-async def get_indices_pairs():
+async def get_indices_pairs(user=Depends(get_telegram_user)):
     token = os.getenv("DEVSBITE_TOKEN")
     url = "https://api.devsbite.com/pairs/indices"
     headers = {
@@ -412,7 +426,8 @@ async def get_indices_pairs():
             return []
             
 @app.get("/api/analysis/active")
-async def get_active_analyses(user_id: int):
+async def get_active_analyses(user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
@@ -433,7 +448,8 @@ async def get_active_analyses(user_id: int):
     return {"analyses": analyses}
 
 @app.get("/api/analysis/history")
-async def get_analysis_history(user_id: int):
+async def get_analysis_history(user=Depends(get_telegram_user)):
+    user_id = user["user_id"]
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
@@ -459,8 +475,7 @@ async def get_analysis_history(user_id: int):
         }
     }
 
-@app.get("/api/news")
-async def get_news():
+async def fetch_news_data():
     token = os.getenv("FINNHUB_TOKEN")
     url = f"https://finnhub.io/api/v1/calendar/economic?token={token}"
     
@@ -485,7 +500,6 @@ async def get_news():
         "EU": "EUR", "DE": "EUR", "FR": "EUR", "IT": "EUR", "ES": "EUR"
     }
 
-    # РњР°РїРїРёРЅРі РјРµС‚Р°Р»Р»РѕРІ Рё СЃС‹СЂСЊСЏ Рє РІР°Р»СЋС‚Р°Рј
     symbol_to_currency_map = {
         "XAU": "USD", "XAG": "USD", "XPT": "USD", "XPD": "USD",
         "WTI": "USD", "BRENT": "USD", "XBR": "USD", "NG": "USD"
@@ -496,10 +510,8 @@ async def get_news():
 
     for event in events:
         try:
-            # РџР°СЂСЃРёРј РІСЂРµРјСЏ UTC
             event_time = datetime.strptime(event["time"], "%Y-%m-%d %H:%M:%S")
             
-            # Р‘РµСЂРµРј РЅРѕРІРѕСЃС‚Рё С‚РѕР»СЊРєРѕ РЅР° СЃРµРіРѕРґРЅСЏ (РѕС‚ -2 С‡Р°СЃРѕРІ РґРѕ РєРѕРЅС†Р° РґРЅСЏ)
             if event_time.date() == now.date() and event_time > (now - timedelta(hours=2)):
                 country = event.get("country", "").strip().upper()
                 currency = country_to_currency.get(country, "ALL")
@@ -510,11 +522,15 @@ async def get_news():
             continue
 
     return {"economicCalendar": filtered_events}
+
+@app.get("/api/news")
+async def get_news(user=Depends(get_telegram_user)):
+    return await fetch_news_data()
     
 @app.post("/api/analysis/forex")
-async def create_forex_analysis(request: Request):
+async def create_forex_analysis(request: Request, user=Depends(get_telegram_user)):
     data = await request.json()
-    user_id = data.get("user_id")
+    user_id = user["user_id"]
     pair = data.get("pair")
     interval_raw = data.get("exp")
     strategy_id = data.get("strategy_id")
@@ -572,7 +588,7 @@ async def create_forex_analysis(request: Request):
                 interval=interval,
                 allowed_indicators=allowed_indicators,
             )
-            news_data = await get_news()
+            news_data = await fetch_news_data()
         except httpx.HTTPStatusError as e:
             error_text = e.response.text
             print(f"ANALYSIS GATEWAY ERROR [{e.response.status_code}]: {error_text} (Payload: {payload})")
@@ -595,11 +611,11 @@ async def create_forex_analysis(request: Request):
 
     return {"status": "success", "analysis_id": analysis_id, "data": analysis_data, "news_data": news_data}
 @app.post("/api/analysis/status")
-async def update_analysis_status(request: Request):
+async def update_analysis_status(request: Request, user=Depends(get_telegram_user)):
     data = await request.json()
     analysis_id = data.get("analysis_id")
     status = data.get("status") 
-    user_id = data.get("user_id")
+    user_id = user["user_id"]
 
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
