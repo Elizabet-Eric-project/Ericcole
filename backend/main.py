@@ -1667,22 +1667,34 @@ async def get_active_analyses(user=Depends(get_telegram_user)):
     return {"analyses": analyses}
 
 @app.get("/api/analysis/history")
-async def get_analysis_history(user=Depends(get_telegram_user)):
-    user_id = user["user_id"]
+async def get_analysis_history(
+    strategy_id: Optional[int] = Query(default=None),
+    user=Depends(get_telegram_user),
+):
+    user_id = int(user["user_id"])
+    strategy_filter = int(strategy_id) if strategy_id is not None and int(strategy_id) > 0 else None
+    where_clause = "a.user_id = %s AND a.status != 'active'"
+    params = [user_id]
+    if strategy_filter is not None:
+        where_clause += " AND a.strategy_id = %s"
+        params.append(strategy_filter)
+
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
-            await cur.execute("""
-                SELECT a.id, a.pair, a.timeframe, a.status, a.created_at, p.name as strategy_name 
+            await cur.execute(f"""
+                SELECT a.id, a.pair, a.timeframe, a.status, a.created_at, a.strategy_id, p.name as strategy_name, p.public_winrate
                 FROM user_analyses a
                 LEFT JOIN presets p ON a.strategy_id = p.id
-                WHERE a.user_id = %s AND a.status != 'active'
+                WHERE {where_clause}
                 ORDER BY a.created_at DESC
-            """, (user_id,))
+            """, tuple(params))
             history = await cur.fetchall()
 
     success_count = sum(1 for item in history if item['status'] == 'success')
     fail_count = sum(1 for item in history if item['status'] == 'fail')
     skipped_count = sum(1 for item in history if item['status'] == 'skipped')
+    closed_total = success_count + fail_count
+    winrate = round((success_count / closed_total) * 100, 2) if closed_total > 0 else 0.0
 
     return {
         "history": history,
@@ -1690,8 +1702,13 @@ async def get_analysis_history(user=Depends(get_telegram_user)):
             "success": success_count,
             "fail": fail_count,
             "skipped": skipped_count,
-            "total": len(history)
-        }
+            "total": len(history),
+            "closed_total": closed_total,
+            "winrate": winrate,
+        },
+        "applied_filter": {
+            "strategy_id": strategy_filter,
+        },
     }
 
 async def fetch_news_data():

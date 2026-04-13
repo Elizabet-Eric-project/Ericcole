@@ -436,7 +436,7 @@ function App() {
         return <Support />;
 
       case 'logAnalysis':
-        return <LogAnalysis user={user} />;
+        return <LogAnalysis user={user} t={t} strategies={strategies} />;
 
       default:
         if (user.mode === 'demo') {

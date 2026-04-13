@@ -150,6 +150,11 @@ export const texts = {
       success: "Success",
       fail: "Failed",
       total: "Total",
+      closedLabel: "Closed",
+      winrate: "Winrate",
+      strategyWinrate: "Strategy winrate",
+      selectStrategy: "Strategy filter",
+      allStrategies: "All strategies",
       interval: "Interval:",
       customStrategy: "Custom Strategy"
     },
