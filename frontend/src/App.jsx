@@ -39,7 +39,7 @@ function App() {
   const [adminUser, setAdminUser] = useState(null);
 
   const [forexParams, setForexParams] = useState({ pair: null, exp: null });
-  const [binaryParams, setBinaryParams] = useState({ pair: null, exp: null });
+  const [binaryParams, setBinaryParams] = useState({ market: 'forex', pair: null, exp: null });
   const [profileScrollTarget, setProfileScrollTarget] = useState(null);
 
   const [activeAnalysisPreload, setActiveAnalysisPreload] = useState(null);
@@ -183,7 +183,7 @@ function App() {
   const handleGoHome = () => {
     activeBackHandler.current = null; 
     setForexParams({ pair: null, exp: null });
-    setBinaryParams({ pair: null, exp: null });
+    setBinaryParams({ market: 'forex', pair: null, exp: null });
     setProfileScrollTarget(null);
     setActiveAnalysisPreload(null);
     

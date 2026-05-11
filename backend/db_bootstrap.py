@@ -133,9 +133,14 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     pair VARCHAR(64) NOT NULL,
                     timeframe VARCHAR(16) NOT NULL,
                     strategy_id BIGINT NULL,
+                    analysis_type VARCHAR(16) NOT NULL DEFAULT 'forex',
+                    market_kind VARCHAR(32) NULL,
+                    entry_price DOUBLE NULL,
+                    exit_price DOUBLE NULL,
                     raw_data LONGTEXT NULL,
                     news_data LONGTEXT NULL,
                     status VARCHAR(16) NOT NULL DEFAULT 'active',
+                    closed_at TIMESTAMP NULL DEFAULT NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -211,6 +216,20 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
 
             await cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS strategy_analysis_settings (
+                    strategy_id BIGINT NOT NULL PRIMARY KEY,
+                    engine VARCHAR(16) NOT NULL DEFAULT 'backend',
+                    gpt_api_key TEXT NULL,
+                    gpt_model VARCHAR(64) NOT NULL DEFAULT 'gpt-4o-mini',
+                    gpt_prompt LONGTEXT NOT NULL,
+                    updated_by BIGINT NULL,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+
+            await cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS admin_analysis_settings (
                     id INT NOT NULL PRIMARY KEY,
                     engine VARCHAR(16) NOT NULL DEFAULT 'backend',
@@ -262,6 +281,34 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
             conn,
             db_name,
             "user_analyses",
+            "analysis_type",
+            "ALTER TABLE user_analyses ADD COLUMN analysis_type VARCHAR(16) NOT NULL DEFAULT 'forex'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "user_analyses",
+            "market_kind",
+            "ALTER TABLE user_analyses ADD COLUMN market_kind VARCHAR(32) NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "user_analyses",
+            "entry_price",
+            "ALTER TABLE user_analyses ADD COLUMN entry_price DOUBLE NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "user_analyses",
+            "exit_price",
+            "ALTER TABLE user_analyses ADD COLUMN exit_price DOUBLE NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "user_analyses",
             "status",
             "ALTER TABLE user_analyses ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'active'",
         )
@@ -271,6 +318,13 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
             "user_analyses",
             "updated_at",
             "ALTER TABLE user_analyses ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "user_analyses",
+            "closed_at",
+            "ALTER TABLE user_analyses ADD COLUMN closed_at TIMESTAMP NULL DEFAULT NULL",
         )
 
         await _ensure_column(conn, db_name, "ai_chats", "title", "ALTER TABLE ai_chats ADD COLUMN title VARCHAR(255) NOT NULL DEFAULT 'New Chat'")
@@ -382,6 +436,89 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
             "updated_at",
             "ALTER TABLE admin_stream_settings ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
         )
+
+        await _ensure_index(conn, db_name, "users", "idx_users_strategy_id", "CREATE INDEX idx_users_strategy_id ON users(strategy_id)")
+        await _ensure_index(conn, db_name, "admin_users", "idx_admin_users_active", "CREATE INDEX idx_admin_users_active ON admin_users(is_active)")
+        await _ensure_index(
+            conn,
+            db_name,
+            "user_analyses",
+            "idx_user_analyses_user_status_created",
+            "CREATE INDEX idx_user_analyses_user_status_created ON user_analyses(user_id, status, created_at)",
+        )
+        await _ensure_index(
+            conn,
+            db_name,
+            "user_analyses",
+            "idx_user_analyses_type_status_created",
+            "CREATE INDEX idx_user_analyses_type_status_created ON user_analyses(analysis_type, status, created_at)",
+        )
+        await _ensure_index(
+            conn,
+            db_name,
+            "ai_chats",
+            "idx_ai_chats_user_status_updated",
+            "CREATE INDEX idx_ai_chats_user_status_updated ON ai_chats(user_id, status, updated_at)",
+        )
+        await _ensure_index(conn, db_name, "ai_messages", "idx_ai_messages_chat_id", "CREATE INDEX idx_ai_messages_chat_id ON ai_messages(chat_id)")
+        await _ensure_index(
+            conn,
+            db_name,
+            "ai_messages",
+            "idx_ai_messages_chat_created",
+            "CREATE INDEX idx_ai_messages_chat_created ON ai_messages(chat_id, created_at)",
+        )
+        await _ensure_index(conn, db_name, "user_presets", "idx_user_presets_preset_id", "CREATE INDEX idx_user_presets_preset_id ON user_presets(preset_id)")
+        await _ensure_index(
+            conn,
+            db_name,
+            "preset_indicators",
+            "idx_preset_indicators_indicator_id",
+            "CREATE INDEX idx_preset_indicators_indicator_id ON preset_indicators(indicator_id)",
+        )
+
+        await _ensure_column(
+            conn,
+            db_name,
+            "strategy_analysis_settings",
+            "engine",
+            "ALTER TABLE strategy_analysis_settings ADD COLUMN engine VARCHAR(16) NOT NULL DEFAULT 'backend'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "strategy_analysis_settings",
+            "gpt_api_key",
+            "ALTER TABLE strategy_analysis_settings ADD COLUMN gpt_api_key TEXT NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "strategy_analysis_settings",
+            "gpt_model",
+            "ALTER TABLE strategy_analysis_settings ADD COLUMN gpt_model VARCHAR(64) NOT NULL DEFAULT 'gpt-4o-mini'",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "strategy_analysis_settings",
+            "gpt_prompt",
+            "ALTER TABLE strategy_analysis_settings ADD COLUMN gpt_prompt LONGTEXT NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "strategy_analysis_settings",
+            "updated_by",
+            "ALTER TABLE strategy_analysis_settings ADD COLUMN updated_by BIGINT NULL",
+        )
+        await _ensure_column(
+            conn,
+            db_name,
+            "strategy_analysis_settings",
+            "updated_at",
+            "ALTER TABLE strategy_analysis_settings ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+        )
         await _ensure_column(
             conn,
             db_name,
@@ -423,39 +560,6 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
             "admin_analysis_settings",
             "updated_at",
             "ALTER TABLE admin_analysis_settings ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
-        )
-
-        await _ensure_index(conn, db_name, "users", "idx_users_strategy_id", "CREATE INDEX idx_users_strategy_id ON users(strategy_id)")
-        await _ensure_index(conn, db_name, "admin_users", "idx_admin_users_active", "CREATE INDEX idx_admin_users_active ON admin_users(is_active)")
-        await _ensure_index(
-            conn,
-            db_name,
-            "user_analyses",
-            "idx_user_analyses_user_status_created",
-            "CREATE INDEX idx_user_analyses_user_status_created ON user_analyses(user_id, status, created_at)",
-        )
-        await _ensure_index(
-            conn,
-            db_name,
-            "ai_chats",
-            "idx_ai_chats_user_status_updated",
-            "CREATE INDEX idx_ai_chats_user_status_updated ON ai_chats(user_id, status, updated_at)",
-        )
-        await _ensure_index(conn, db_name, "ai_messages", "idx_ai_messages_chat_id", "CREATE INDEX idx_ai_messages_chat_id ON ai_messages(chat_id)")
-        await _ensure_index(
-            conn,
-            db_name,
-            "ai_messages",
-            "idx_ai_messages_chat_created",
-            "CREATE INDEX idx_ai_messages_chat_created ON ai_messages(chat_id, created_at)",
-        )
-        await _ensure_index(conn, db_name, "user_presets", "idx_user_presets_preset_id", "CREATE INDEX idx_user_presets_preset_id ON user_presets(preset_id)")
-        await _ensure_index(
-            conn,
-            db_name,
-            "preset_indicators",
-            "idx_preset_indicators_indicator_id",
-            "CREATE INDEX idx_preset_indicators_indicator_id ON preset_indicators(indicator_id)",
         )
 
         indicators_seed = [
@@ -531,6 +635,22 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                 """
             )
 
+            await cur.execute(
+                """
+                UPDATE strategy_analysis_settings
+                SET gpt_prompt = %s
+                WHERE gpt_prompt IS NULL OR TRIM(gpt_prompt) = ''
+                """,
+                (DEFAULT_ANALYSIS_GPT_PROMPT,),
+            )
+            await cur.execute(
+                """
+                UPDATE strategy_analysis_settings
+                SET gpt_model = %s
+                WHERE gpt_model IS NULL OR TRIM(gpt_model) = ''
+                """,
+                (DEFAULT_ANALYSIS_GPT_MODEL,),
+            )
             await cur.execute(
                 """
                 INSERT INTO admin_analysis_settings (id, engine, gpt_api_key, gpt_model, gpt_prompt, updated_by)
