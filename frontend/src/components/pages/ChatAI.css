@@ -1,7 +1,13 @@
 .chat-container-fixed {
   display: flex;
   flex-direction: column;
-  height: clamp(360px, calc(100dvh - 228px), 760px); 
+  height: min(
+    760px,
+    max(
+      280px,
+      calc(100dvh - var(--app-main-top, 106px) - var(--app-bottom-overlay-height, 54px) - 18px)
+    )
+  );
   width: 100%;
   max-width: 800px;
   margin: 0 auto;
@@ -381,7 +387,13 @@
 
 @media (max-width: 520px) {
   .chat-container-fixed {
-    height: clamp(320px, calc(100dvh - 214px), 700px);
+    height: min(
+      700px,
+      max(
+        260px,
+        calc(100dvh - var(--app-main-top, 106px) - var(--app-bottom-overlay-height, 54px) - 14px)
+      )
+    );
     padding: 0 2px;
   }
 
