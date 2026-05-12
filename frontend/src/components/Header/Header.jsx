@@ -22,6 +22,7 @@ export default function Header({
   const t = texts.en;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef(null);
+  const bottomShellRef = useRef(null);
 
   const binaryMenu = useMemo(
     () => [
@@ -52,6 +53,41 @@ export default function Header({
   useEffect(() => {
     setIsMenuOpen(false);
   }, [activePage]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+
+    const updateBottomOverlay = () => {
+      if (!bottomShellRef.current) return;
+
+      const rect = bottomShellRef.current.getBoundingClientRect();
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const overlayHeight = Math.max(0, viewportHeight - rect.top);
+
+      root.style.setProperty('--app-bottom-overlay-height', `${Math.ceil(overlayHeight)}px`);
+    };
+
+    updateBottomOverlay();
+
+    const observer = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(updateBottomOverlay)
+      : null;
+
+    if (observer && bottomShellRef.current) {
+      observer.observe(bottomShellRef.current);
+    }
+
+    window.addEventListener('resize', updateBottomOverlay);
+    window.visualViewport?.addEventListener('resize', updateBottomOverlay);
+    window.visualViewport?.addEventListener('scroll', updateBottomOverlay);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateBottomOverlay);
+      window.visualViewport?.removeEventListener('resize', updateBottomOverlay);
+      window.visualViewport?.removeEventListener('scroll', updateBottomOverlay);
+    };
+  }, []);
 
   useEffect(() => {
     const handleOutside = (event) => {
@@ -162,7 +198,7 @@ export default function Header({
         </div>
       </div>
 
-      <div className={`ev-bottom-shell ${isDesktop ? 'desktop' : 'mobile'}`}>
+      <div className={`ev-bottom-shell ${isDesktop ? 'desktop' : 'mobile'}`} ref={bottomShellRef}>
         <div className="micro-disclaimer">
           {mode === 'demo' && (
             <div className="demo-watermark-global">
