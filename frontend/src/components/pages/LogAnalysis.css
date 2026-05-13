@@ -225,6 +225,10 @@
   border-color: rgba(212, 175, 55, 0.4);
 }
 
+.log-card-binary {
+  gap: 10px;
+}
+
 .log-card-top {
   display: flex;
   justify-content: space-between;
@@ -247,6 +251,49 @@
   width: 100%;
   font-size: 0.84rem;
   color: var(--text-secondary);
+  gap: 10px;
+}
+
+.log-card-meta span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.log-binary-details {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.log-binary-details span {
+  border: 1px solid rgba(143, 106, 46, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 250, 242, 0.76);
+  color: var(--text-secondary);
+  padding: 7px 9px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.log-binary-details .log-binary-signal {
+  border-color: rgba(143, 106, 46, 0.28);
+  background: rgba(143, 106, 46, 0.1);
+  letter-spacing: 0.04em;
+}
+
+.log-binary-details .sig-buy {
+  color: #2f9e5d;
+}
+
+.log-binary-details .sig-sell {
+  color: #d85246;
+}
+
+.log-binary-details .sig-neutral {
+  color: #9a722d;
 }
 
 .log-card-bottom {
