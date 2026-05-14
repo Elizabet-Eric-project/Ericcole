@@ -191,6 +191,17 @@ export const texts = {
       emptyHistory: "History is empty",
       closeBtn: "Close"
     },
+    supportPage: {
+      title: "Support Center",
+      quickTitle: "Quick Answers",
+      quickText: "Most questions can be answered in our internal FAQ and official channel. You can find updates, explanations, and practical guidance there.",
+      contactTitle: "Need Personal Help?",
+      contactText: "If your question is still unresolved, write to support and our team will respond as soon as possible.",
+      openFaq: "Open FAQ",
+      openChannel: "Open Channel",
+      writeSupport: "Write to Support",
+      envHint: "Set support links in Admin Center → Settings → Link management."
+    },
     tvChart: {
       title: "Live Market Chart",
       chart: "Chart",
