@@ -31,9 +31,9 @@ try:
 except ModuleNotFoundError:
     from stream_matching import stream_requested_asset_matches
 try:
-    from backend.market_symbol_mapping import get_twelvedata_symbol_candidates, has_explicit_twelvedata_mapping
+    from backend.market_symbol_mapping import get_forex_stock_assets, get_twelvedata_symbol_candidates, has_explicit_twelvedata_mapping
 except ModuleNotFoundError:
-    from market_symbol_mapping import get_twelvedata_symbol_candidates, has_explicit_twelvedata_mapping
+    from market_symbol_mapping import get_forex_stock_assets, get_twelvedata_symbol_candidates, has_explicit_twelvedata_mapping
 
 load_dotenv()
 
@@ -446,7 +446,7 @@ async def get_forex_stream_options_payload(market: str) -> Dict[str, Any]:
     elif forex_market == "commodities":
         pairs = normalize_forex_stream_assets(forex_market, await fetch_devsbite_json("pairs/commodity"))
     else:
-        pairs = normalize_forex_stream_assets(forex_market, await fetch_devsbite_json("pairs/otc/stocks"))
+        pairs = get_forex_stock_assets()
     return {
         "analysis_type": "forex",
         "kind": forex_market,
@@ -3018,6 +3018,11 @@ async def get_otc_stock_pairs(user=Depends(get_telegram_user)):
             next_item["asset"] = asset
             assets.append(next_item)
     return {"assets": assets, "pairs": payload["pairs"]}
+
+@app.get("/api/pairs/forex/stocks")
+async def get_forex_stock_pairs(user=Depends(get_telegram_user)):
+    assets = get_forex_stock_assets()
+    return {"assets": assets, "pairs": assets}
 
 
 @app.get("/api/pairs")
