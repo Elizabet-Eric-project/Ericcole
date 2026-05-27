@@ -309,7 +309,7 @@ export default function UsersPage() {
               <div className="admin-muted">
                 {selectedUser.trader_id
                   ? 'При активной синхронизации баланс будет подтягиваться с Pocket.'
-                  : 'Синхронизацию можно включить только после указания Trader ID.'}
+                  : 'Баланс можно задать вручную. Синхронизация доступна только после указания Trader ID.'}
               </div>
               <div className="admin-row-actions">
                 <button className="admin-btn" onClick={saveBalance} disabled={actionLoading}>
