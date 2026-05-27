@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiAdminFetchJson } from '../../lib/api';
 
 const getDisplayName = (user) => user?.first_name || user?.username || `User ${user?.user_id || ''}`;
+const formatBalance = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? `$${parsed.toFixed(2)}` : '$0.00';
+};
 
 export default function UsersPage() {
   const [search, setSearch] = useState('');
@@ -97,6 +101,8 @@ export default function UsersPage() {
 
           <div className="admin-user-grid">
             <div><span>ID:</span> {selectedUser.user_id}</div>
+            <div><span>Trader ID:</span> {selectedUser.trader_id || 'Не указан'}</div>
+            <div><span>Баланс:</span> {formatBalance(selectedUser.balance)}</div>
             <div><span>Username:</span> {selectedUser.username || '-'}</div>
             <div><span>Имя:</span> {selectedUser.first_name || '-'}</div>
             <div><span>Режим:</span> {selectedUser.mode || '-'}</div>
@@ -168,7 +174,7 @@ export default function UsersPage() {
                 </span>
               </div>
               <div className="admin-entity-meta">
-                ID: {user.user_id} | {blocked ? 'blocked' : (user.mode || '-')} | {user.strategy_name || user.strategy_id || '-'}
+                ID: {user.user_id} | Trader: {user.trader_id || '-'} | {formatBalance(user.balance)} | {blocked ? 'blocked' : (user.mode || '-')} | {user.strategy_name || user.strategy_id || '-'}
               </div>
             </button>
           );

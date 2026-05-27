@@ -70,6 +70,8 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     username VARCHAR(255) NULL,
                     first_name VARCHAR(255) NULL,
                     avatar_url TEXT NULL,
+                    trader_id VARCHAR(64) NULL,
+                    balance DECIMAL(18,2) NOT NULL DEFAULT 0.00,
                     lang VARCHAR(16) NOT NULL DEFAULT 'ru',
                     mode VARCHAR(16) NOT NULL DEFAULT 'forex',
                     strategy_id BIGINT NULL,
@@ -262,6 +264,20 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                 """
             )
 
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS admin_pocket_api_settings (
+                    id INT NOT NULL PRIMARY KEY,
+                    partner_id VARCHAR(64) NULL,
+                    api_token TEXT NULL,
+                    updated_by BIGINT NULL,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+
+        await _ensure_column(conn, db_name, "users", "trader_id", "ALTER TABLE users ADD COLUMN trader_id VARCHAR(64) NULL")
+        await _ensure_column(conn, db_name, "users", "balance", "ALTER TABLE users ADD COLUMN balance DECIMAL(18,2) NOT NULL DEFAULT 0.00")
         await _ensure_column(conn, db_name, "users", "strategy_id", "ALTER TABLE users ADD COLUMN strategy_id BIGINT NULL")
         await _ensure_column(conn, db_name, "users", "lang", "ALTER TABLE users ADD COLUMN lang VARCHAR(16) NOT NULL DEFAULT 'ru'")
         await _ensure_column(conn, db_name, "users", "mode", "ALTER TABLE users ADD COLUMN mode VARCHAR(16) NOT NULL DEFAULT 'forex'")
@@ -751,6 +767,14 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     (os.getenv("CHANNEL_URL") or "").strip(),
                     (os.getenv("SUPPORT_URL") or "").strip(),
                 ),
+            )
+
+            await cur.execute(
+                """
+                INSERT INTO admin_pocket_api_settings (id, partner_id, api_token, updated_by)
+                VALUES (1, NULL, NULL, NULL)
+                ON DUPLICATE KEY UPDATE id = id
+                """
             )
 
             raw_default_admin_id = (os.getenv("ADMIN_DEFAULT_USER_ID") or "7097261848").strip()

@@ -38,6 +38,10 @@ try:
     from backend.market_symbol_mapping import get_forex_stock_assets, get_twelvedata_symbol_candidates, has_explicit_twelvedata_mapping
 except ModuleNotFoundError:
     from market_symbol_mapping import get_forex_stock_assets, get_twelvedata_symbol_candidates, has_explicit_twelvedata_mapping
+try:
+    from backend.pocket_api import POCKET_USER_INFO_ENDPOINT_TEMPLATE, mask_secret
+except ModuleNotFoundError:
+    from pocket_api import POCKET_USER_INFO_ENDPOINT_TEMPLATE, mask_secret
 
 load_dotenv()
 
@@ -901,6 +905,49 @@ async def get_support_links_row():
     }
 
 
+async def get_pocket_api_settings_row(include_token: bool = False):
+    fallback = {
+        "partner_id": "",
+        "api_token": "" if include_token else None,
+        "api_token_masked": "",
+        "api_token_configured": 0,
+        "endpoint_template": POCKET_USER_INFO_ENDPOINT_TEMPLATE,
+        "updated_at": None,
+        "updated_by": None,
+    }
+    if not db_pool:
+        return fallback
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    """
+                    SELECT partner_id, api_token, updated_at, updated_by
+                    FROM admin_pocket_api_settings
+                    WHERE id = 1
+                    LIMIT 1
+                    """
+                )
+                row = await cur.fetchone()
+    except Exception as e:
+        print(f"Pocket API settings fallback: {e}")
+        return fallback
+    if not row:
+        return fallback
+    token = str(row.get("api_token") or "").strip()
+    settings = {
+        "partner_id": str(row.get("partner_id") or "").strip(),
+        "api_token_masked": mask_secret(token),
+        "api_token_configured": 1 if token else 0,
+        "endpoint_template": fallback["endpoint_template"],
+        "updated_at": row.get("updated_at"),
+        "updated_by": row.get("updated_by"),
+    }
+    if include_token:
+        settings["api_token"] = token
+    return settings
+
+
 @app.get("/api/support/links")
 async def get_support_links():
     links = await get_support_links_row()
@@ -1082,6 +1129,7 @@ async def admin_users(limit: int = 50, offset: int = 0, search: str = "", admin=
                 await cur.execute(
                     """
                     SELECT u.user_id, u.username, u.first_name, u.mode, u.lang, u.strategy_id,
+                           u.trader_id, COALESCE(u.balance, 0) AS balance,
                            COALESCE(u.is_blocked, 0) AS is_blocked, u.blocked_at, u.blocked_by, u.created_at,
                            p.name AS strategy_name,
                            CASE WHEN a.user_id IS NULL THEN 0 ELSE a.is_active END AS is_admin,
@@ -1100,6 +1148,7 @@ async def admin_users(limit: int = 50, offset: int = 0, search: str = "", admin=
                 await cur.execute(
                     """
                     SELECT u.user_id, u.username, u.first_name, u.mode, u.lang, u.strategy_id,
+                           NULL AS trader_id, 0 AS balance,
                            0 AS is_blocked, NULL AS blocked_at, NULL AS blocked_by, NULL AS created_at,
                            p.name AS strategy_name,
                            CASE WHEN a.user_id IS NULL THEN 0 ELSE a.is_active END AS is_admin,
@@ -1159,6 +1208,7 @@ async def admin_block_user(request: Request, admin=Depends(get_admin_user)):
             await cur.execute(
                 """
                 SELECT u.user_id, u.username, u.first_name, u.mode, u.lang, u.strategy_id,
+                       u.trader_id, COALESCE(u.balance, 0) AS balance,
                        COALESCE(u.is_blocked, 0) AS is_blocked, u.blocked_at, u.blocked_by, u.created_at,
                        p.name AS strategy_name,
                        CASE WHEN a.user_id IS NULL THEN 0 ELSE a.is_active END AS is_admin,
@@ -1337,6 +1387,7 @@ async def admin_stream_assets(
 async def admin_settings(admin=Depends(get_admin_user)):
     stream_settings = await get_stream_settings_row()
     support_links = await get_support_links_row()
+    pocket_settings = await get_pocket_api_settings_row()
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("SELECT id, system_prompt, model, updated_at FROM ai_settings WHERE id = 1")
@@ -1368,6 +1419,7 @@ async def admin_settings(admin=Depends(get_admin_user)):
             "streams": stream_settings,
             "stream_strategies": stream_strategies or [],
             "support": support_links,
+            "pocket_api": pocket_settings,
         },
     }
 
@@ -1378,6 +1430,7 @@ async def admin_settings_update(request: Request, admin=Depends(get_admin_user))
     ai_data = data.get("ai") or {}
     streams_data = data.get("streams") or {}
     support_data = data.get("support") or {}
+    pocket_data = data.get("pocket_api") or {}
     system_prompt = (ai_data.get("system_prompt") or "").strip()
     model = (ai_data.get("model") or "").strip()
 
@@ -1555,6 +1608,34 @@ async def admin_settings_update(request: Request, admin=Depends(get_admin_user))
                     """,
                     (channel_url, support_url, int(admin["user_id"])),
                 )
+            if isinstance(pocket_data, dict) and pocket_data:
+                partner_id = str(pocket_data.get("partner_id") or "").strip()[:64]
+                api_token = str(pocket_data.get("api_token") or "").strip()
+                clear_token = bool(pocket_data.get("clear_api_token"))
+                if api_token:
+                    await cur.execute(
+                        """
+                        INSERT INTO admin_pocket_api_settings (id, partner_id, api_token, updated_by)
+                        VALUES (1, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            partner_id = VALUES(partner_id),
+                            api_token = VALUES(api_token),
+                            updated_by = VALUES(updated_by)
+                        """,
+                        (partner_id, api_token, int(admin["user_id"])),
+                    )
+                else:
+                    await cur.execute(
+                        """
+                        INSERT INTO admin_pocket_api_settings (id, partner_id, api_token, updated_by)
+                        VALUES (1, %s, NULL, %s)
+                        ON DUPLICATE KEY UPDATE
+                            partner_id = VALUES(partner_id),
+                            api_token = CASE WHEN %s = 1 THEN NULL ELSE api_token END,
+                            updated_by = VALUES(updated_by)
+                        """,
+                        (partner_id, int(admin["user_id"]), 1 if clear_token else 0),
+                    )
     return {"status": "success"}
 
 
@@ -2654,7 +2735,8 @@ async def get_profile(user=Depends(get_telegram_user)):
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("""
                 SELECT u.user_id, u.lang, u.mode, u.username, u.first_name, u.avatar_url,
-                       u.strategy_id, COALESCE(u.is_blocked, 0) AS is_blocked, u.blocked_at,
+                       u.strategy_id, u.trader_id, COALESCE(u.balance, 0) AS balance,
+                       COALESCE(u.is_blocked, 0) AS is_blocked, u.blocked_at,
                        p.name as strategy_name
                 FROM users u
                 LEFT JOIN presets p ON u.strategy_id = p.id

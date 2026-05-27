@@ -55,6 +55,12 @@ export default function Profile({
     formatWinrate(strategy?.public_winrate)
   );
 
+  const formatBalance = (value) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return '$0.00';
+    return `$${parsed.toFixed(2)}`;
+  };
+
   const openCreateModal = () => {
     setEditPresetId(null);
     setFormData({ name: '', indicators: [], icon: '\u26A1' });
@@ -164,11 +170,11 @@ export default function Profile({
                 <div className="stats-row">
                   <div className="stat-box">
                     <span className="stat-label">{t.profile.idLabel}</span>
-                    <span className="stat-value">*****</span>
+                    <span className="stat-value">{user.trader_id || t.profile.notSpecified || 'Not specified'}</span>
                   </div>
                   <div className="stat-box right">
                     <span className="stat-label">{t.profile.balanceLabel}</span>
-                    <span className="stat-value gold">*****</span>
+                    <span className="stat-value gold">{formatBalance(user.balance)}</span>
                   </div>
                 </div>
 
