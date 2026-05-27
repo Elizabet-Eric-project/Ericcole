@@ -1075,13 +1075,6 @@ export default function SettingsPage({ adminUser }) {
           />
         </div>
 
-        <div className="admin-muted">
-          Endpoint:{' '}
-          <code>https://pocketpartners.com/api/user-info/{'{user_id}'}/{'{partner_id}'}/{'{hash}'}</code>
-          <br />
-          Hash считается на backend по формуле md5(user_id:partner_id:api_token).
-        </div>
-
         <div className="admin-row-actions">
           <button className="admin-btn" onClick={() => saveSettings('pocket')} disabled={saving}>
             {saving ? 'Сохранение...' : 'Сохранить API'}
