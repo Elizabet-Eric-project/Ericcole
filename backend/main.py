@@ -43,9 +43,21 @@ try:
 except ModuleNotFoundError:
     from pocket_api import POCKET_USER_INFO_ENDPOINT_TEMPLATE, build_pocket_user_info_url, mask_secret
 try:
-    from backend.aio_tracking import extract_aio_visit_uuid_from_start_text
+    from backend.aio_tracking import (
+        build_aio_postback_url,
+        extract_aio_visit_uuid_from_start_text,
+        normalize_aio_event_slug,
+        normalize_aio_revenue,
+        normalize_aio_visit_uuid,
+    )
 except ModuleNotFoundError:
-    from aio_tracking import extract_aio_visit_uuid_from_start_text
+    from aio_tracking import (
+        build_aio_postback_url,
+        extract_aio_visit_uuid_from_start_text,
+        normalize_aio_event_slug,
+        normalize_aio_revenue,
+        normalize_aio_visit_uuid,
+    )
 
 load_dotenv()
 
@@ -183,6 +195,111 @@ async def is_admin_user(user_id: int) -> bool:
             )
             row = await cur.fetchone()
     return bool(row)
+
+
+async def send_aio_postback_event(
+    user_id: int,
+    event_slug: str,
+    revenue: Optional[object] = None,
+    currency: Optional[str] = None,
+    unique_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    if not db_pool:
+        return {"status": "skipped", "reason": "db_unavailable"}
+
+    normalized_event_slug = normalize_aio_event_slug(event_slug)
+    if not normalized_event_slug:
+        return {"status": "skipped", "reason": "invalid_event_slug"}
+
+    normalized_unique_key = str(unique_key or normalized_event_slug).strip()[:128] or normalized_event_slug
+    normalized_currency = str(currency or "").strip().upper()[:8] or None
+    normalized_revenue = normalize_aio_revenue(revenue)
+
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT aio_visit_uuid
+                FROM users
+                WHERE user_id = %s
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            user_row = await cur.fetchone()
+
+            aio_visit_uuid = normalize_aio_visit_uuid((user_row or {}).get("aio_visit_uuid"))
+            if not aio_visit_uuid:
+                return {"status": "skipped", "reason": "missing_aio_visit_uuid"}
+
+            request_url = build_aio_postback_url(
+                aio_visit_uuid,
+                normalized_event_slug,
+                revenue=normalized_revenue,
+                currency=normalized_currency,
+                unique_key=None if normalized_unique_key == normalized_event_slug else normalized_unique_key,
+            )
+
+            await cur.execute(
+                """
+                INSERT IGNORE INTO aio_postback_events (
+                    user_id, aio_visit_uuid, event_slug, unique_key, revenue, currency, request_url, status
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending')
+                """,
+                (
+                    user_id,
+                    aio_visit_uuid,
+                    normalized_event_slug,
+                    normalized_unique_key,
+                    normalized_revenue,
+                    normalized_currency,
+                    request_url,
+                ),
+            )
+            if cur.rowcount == 0:
+                return {"status": "skipped", "reason": "duplicate"}
+
+            event_id = cur.lastrowid
+
+    response_status = None
+    response_body = ""
+    error_text = None
+    final_status = "sent"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(request_url)
+        response_status = response.status_code
+        response_body = response.text[:4000]
+        if response.status_code >= 400:
+            final_status = "failed"
+            error_text = f"AIO returned HTTP {response.status_code}"
+    except Exception as exc:
+        final_status = "failed"
+        error_text = str(exc)[:4000]
+
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE aio_postback_events
+                SET status = %s,
+                    response_status = %s,
+                    response_body = %s,
+                    error = %s,
+                    sent_at = NOW()
+                WHERE id = %s
+                """,
+                (final_status, response_status, response_body, error_text, event_id),
+            )
+
+    return {
+        "status": final_status,
+        "event_id": event_id,
+        "response_status": response_status,
+        "error": error_text,
+    }
 
 
 async def get_admin_user(
@@ -4033,6 +4150,8 @@ async def cmd_start(message: types.Message):
                     """,
                     [(user_id, "forex"), (user_id, "binary")],
                 )
+
+    asyncio.create_task(send_aio_postback_event(user_id, "bot_start"))
 
     welcome_text = (
         f"Welcome, {user_name}!\n\n"
