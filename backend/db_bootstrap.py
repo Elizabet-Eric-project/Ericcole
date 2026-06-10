@@ -70,6 +70,7 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     username VARCHAR(255) NULL,
                     first_name VARCHAR(255) NULL,
                     avatar_url TEXT NULL,
+                    aio_visit_uuid VARCHAR(64) NULL,
                     trader_id VARCHAR(64) NULL,
                     balance DECIMAL(18,2) NOT NULL DEFAULT 0.00,
                     balance_sync_enabled TINYINT(1) NOT NULL DEFAULT 0,
@@ -305,6 +306,7 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
             )
 
         await _ensure_column(conn, db_name, "users", "trader_id", "ALTER TABLE users ADD COLUMN trader_id VARCHAR(64) NULL")
+        await _ensure_column(conn, db_name, "users", "aio_visit_uuid", "ALTER TABLE users ADD COLUMN aio_visit_uuid VARCHAR(64) NULL")
         await _ensure_column(conn, db_name, "users", "balance", "ALTER TABLE users ADD COLUMN balance DECIMAL(18,2) NOT NULL DEFAULT 0.00")
         await _ensure_column(conn, db_name, "users", "balance_sync_enabled", "ALTER TABLE users ADD COLUMN balance_sync_enabled TINYINT(1) NOT NULL DEFAULT 0")
         await _ensure_column(conn, db_name, "users", "balance_synced_at", "ALTER TABLE users ADD COLUMN balance_synced_at TIMESTAMP NULL DEFAULT NULL")
@@ -543,6 +545,7 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
         )
 
         await _ensure_index(conn, db_name, "users", "idx_users_strategy_id", "CREATE INDEX idx_users_strategy_id ON users(strategy_id)")
+        await _ensure_index(conn, db_name, "users", "idx_users_aio_visit_uuid", "CREATE INDEX idx_users_aio_visit_uuid ON users(aio_visit_uuid)")
         await _ensure_index(conn, db_name, "users", "idx_users_balance_sync", "CREATE INDEX idx_users_balance_sync ON users(balance_sync_enabled, balance_synced_at)")
         await _ensure_index(conn, db_name, "admin_users", "idx_admin_users_active", "CREATE INDEX idx_admin_users_active ON admin_users(is_active)")
         await _ensure_index(

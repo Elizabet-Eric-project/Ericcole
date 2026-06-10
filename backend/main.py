@@ -42,6 +42,10 @@ try:
     from backend.pocket_api import POCKET_USER_INFO_ENDPOINT_TEMPLATE, build_pocket_user_info_url, mask_secret
 except ModuleNotFoundError:
     from pocket_api import POCKET_USER_INFO_ENDPOINT_TEMPLATE, build_pocket_user_info_url, mask_secret
+try:
+    from backend.aio_tracking import extract_aio_visit_uuid_from_start_text
+except ModuleNotFoundError:
+    from aio_tracking import extract_aio_visit_uuid_from_start_text
 
 load_dotenv()
 
@@ -3999,6 +4003,36 @@ async def cmd_start(message: types.Message):
     global menu_photo_file_id
     user_name = message.from_user.first_name or message.from_user.username or "Trader"
     user_id = int(message.from_user.id)
+    username = message.from_user.username or ""
+    first_name = message.from_user.first_name or ""
+    aio_visit_uuid = extract_aio_visit_uuid_from_start_text(message.text)
+
+    if db_pool:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    INSERT INTO users (user_id, username, first_name, aio_visit_uuid, lang, mode)
+                    VALUES (%s, %s, %s, %s, 'ru', 'forex')
+                    ON DUPLICATE KEY UPDATE
+                        username = VALUES(username),
+                        first_name = VALUES(first_name),
+                        aio_visit_uuid = CASE
+                            WHEN (aio_visit_uuid IS NULL OR TRIM(aio_visit_uuid) = '')
+                                 AND VALUES(aio_visit_uuid) IS NOT NULL
+                            THEN VALUES(aio_visit_uuid)
+                            ELSE aio_visit_uuid
+                        END
+                    """,
+                    (user_id, username, first_name, aio_visit_uuid),
+                )
+                await cur.executemany(
+                    """
+                    INSERT IGNORE INTO user_mode_access (user_id, mode, is_enabled, updated_by)
+                    VALUES (%s, %s, 1, NULL)
+                    """,
+                    [(user_id, "forex"), (user_id, "binary")],
+                )
 
     welcome_text = (
         f"Welcome, {user_name}!\n\n"
