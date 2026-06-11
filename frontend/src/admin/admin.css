@@ -1083,6 +1083,21 @@
   padding: 6px 8px;
 }
 
+.admin-toggle-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.admin-toggle-line input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
 .admin-textarea {
   width: 100%;
   border: 1px solid var(--line);
