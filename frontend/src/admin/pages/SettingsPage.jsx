@@ -200,7 +200,9 @@ export default function SettingsPage({ adminUser }) {
   const [streamMarketLoading, setStreamMarketLoading] = useState(false);
 
   const [systemAccessEnabled, setSystemAccessEnabled] = useState(true);
+  const [channelId, setChannelId] = useState('-1003584421739');
   const [channelUrl, setChannelUrl] = useState('');
+  const [checkSubscriptionEnabled, setCheckSubscriptionEnabled] = useState(true);
   const [supportUrl, setSupportUrl] = useState('');
   const [pocketPartnerId, setPocketPartnerId] = useState('');
   const [pocketApiToken, setPocketApiToken] = useState('');
@@ -278,7 +280,13 @@ export default function SettingsPage({ adminUser }) {
       setStreamStrategies(settingsRes?.settings?.stream_strategies || []);
 
       const support = settingsRes?.settings?.support || {};
+      setChannelId(
+        support.channel_id !== null && support.channel_id !== undefined
+          ? String(support.channel_id)
+          : '-1003584421739'
+      );
       setChannelUrl(support.channel_url || '');
+      setCheckSubscriptionEnabled(Boolean(Number(support.check_subscription_enabled ?? 1)));
       setSupportUrl(support.support_url || '');
 
       const pocket = settingsRes?.settings?.pocket_api || {};
@@ -433,7 +441,9 @@ export default function SettingsPage({ adminUser }) {
 
       if (shouldSaveSupport) {
         payload.support = {
+          channel_id: channelId.trim(),
           channel_url: channelUrl.trim(),
+          check_subscription_enabled: checkSubscriptionEnabled,
           support_url: supportUrl.trim(),
         };
       }
@@ -549,8 +559,8 @@ export default function SettingsPage({ adminUser }) {
       {
         key: 'support',
         icon: '🔗',
-        title: 'Управление ссылками',
-        subtitle: channelUrl || supportUrl ? 'Ссылки настроены' : 'Ссылки не заданы',
+        title: 'Канал',
+        subtitle: checkSubscriptionEnabled ? 'Проверка подписки включена' : 'Проверка подписки выключена',
       },
       {
         key: 'pocket',
@@ -565,7 +575,7 @@ export default function SettingsPage({ adminUser }) {
         subtitle: `Текущих админов: ${admins.length}`,
       },
     ],
-    [admins.length, channelUrl, model, pocketApiTokenConfigured, pocketApiTokenMasked, pocketPartnerId, streamEnabled, supportUrl, systemAccessEnabled]
+    [admins.length, channelUrl, checkSubscriptionEnabled, model, pocketApiTokenConfigured, pocketApiTokenMasked, pocketPartnerId, streamEnabled, supportUrl, systemAccessEnabled]
   );
 
   const goMenu = () => {
@@ -1001,12 +1011,37 @@ export default function SettingsPage({ adminUser }) {
     return (
       <div className="admin-card admin-settings-detail">
         <div className="admin-row-between">
-          <h3 className="admin-section-title">Управление ссылками</h3>
+          <h3 className="admin-section-title">Канал</h3>
           <button className="admin-btn-outline" onClick={goMenu}>← К карточкам</button>
         </div>
 
         <div className="admin-muted">
-          Эти ссылки используются в разделе поддержки: кнопка канала и кнопка личного обращения.
+          Эти настройки используются в Telegram-воронке и в разделе поддержки.
+        </div>
+
+        <div className="admin-field">
+          <label className="admin-label">Проверять подписку</label>
+          <label className="admin-toggle-line">
+            <input
+              type="checkbox"
+              checked={checkSubscriptionEnabled}
+              onChange={(e) => setCheckSubscriptionEnabled(e.target.checked)}
+            />{' '}
+            {checkSubscriptionEnabled ? 'Да' : 'Нет'}
+          </label>
+          <div className="admin-muted">
+            Если включено, бот откроет меню только после успешной проверки подписки.
+          </div>
+        </div>
+
+        <div className="admin-field">
+          <label className="admin-label">ID канала</label>
+          <input
+            className="admin-input"
+            placeholder="-1003584421739"
+            value={channelId}
+            onChange={(e) => setChannelId(e.target.value)}
+          />
         </div>
 
         <div className="admin-field">
@@ -1031,7 +1066,7 @@ export default function SettingsPage({ adminUser }) {
 
         <div className="admin-row-actions">
           <button className="admin-btn" onClick={() => saveSettings('support')} disabled={saving}>
-            {saving ? 'Сохранение...' : 'Сохранить ссылки'}
+            {saving ? 'Сохранение...' : 'Сохранить канал'}
           </button>
         </div>
 

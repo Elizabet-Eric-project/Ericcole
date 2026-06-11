@@ -58,6 +58,26 @@ except ModuleNotFoundError:
         normalize_aio_revenue,
         normalize_aio_visit_uuid,
     )
+try:
+    from backend.bot_funnel import (
+        CHANNEL_SUBSCRIBE_EVENT,
+        QUIZ_COMPLETE_EVENT,
+        get_next_quiz_step,
+        get_quiz_question,
+        is_active_channel_member,
+        normalize_channel_settings,
+        normalize_quiz_answer,
+    )
+except ModuleNotFoundError:
+    from bot_funnel import (
+        CHANNEL_SUBSCRIBE_EVENT,
+        QUIZ_COMPLETE_EVENT,
+        get_next_quiz_step,
+        get_quiz_question,
+        is_active_channel_member,
+        normalize_channel_settings,
+        normalize_quiz_answer,
+    )
 
 load_dotenv()
 
@@ -1000,15 +1020,17 @@ async def get_support_links_row():
     fallback = {
         "channel_url": (os.getenv("CHANNEL_URL") or "").strip(),
         "support_url": (os.getenv("SUPPORT_URL") or "").strip(),
+        "channel_id": (os.getenv("CHANNEL_ID") or "").strip(),
+        "check_subscription_enabled": (os.getenv("CHECK_SUBSCRIPTION_ENABLED") or "").strip(),
     }
     if not db_pool:
-        return fallback
+        return normalize_channel_settings(fallback)
     try:
         async with db_pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(
                     """
-                    SELECT channel_url, support_url
+                    SELECT channel_id, channel_url, support_url, check_subscription_enabled
                     FROM admin_support_links
                     WHERE id = 1
                     LIMIT 1
@@ -1017,13 +1039,18 @@ async def get_support_links_row():
                 row = await cur.fetchone()
     except Exception as e:
         print(f"Support links fallback: {e}")
-        return fallback
+        return normalize_channel_settings(fallback)
     if not row:
-        return fallback
-    return {
-        "channel_url": (row.get("channel_url") or fallback["channel_url"] or "").strip(),
-        "support_url": (row.get("support_url") or fallback["support_url"] or "").strip(),
+        return normalize_channel_settings(fallback)
+    merged = {
+        "channel_id": row.get("channel_id") or fallback["channel_id"],
+        "channel_url": row.get("channel_url") or fallback["channel_url"],
+        "support_url": row.get("support_url") or fallback["support_url"],
+        "check_subscription_enabled": row.get("check_subscription_enabled")
+        if row.get("check_subscription_enabled") is not None
+        else fallback["check_subscription_enabled"],
     }
+    return normalize_channel_settings(merged)
 
 
 async def get_pocket_api_settings_row(include_token: bool = False):
@@ -1204,7 +1231,9 @@ async def get_support_links():
     support_url = links["support_url"]
     return {
         "channel_url": channel_url,
-        "support_url": support_url
+        "support_url": support_url,
+        "channel_id": links["channel_id"],
+        "check_subscription_enabled": links["check_subscription_enabled"],
     }
 
 @app.get("/api/webapp/bot-info")
@@ -1971,18 +2000,26 @@ async def admin_settings_update(request: Request, admin=Depends(get_admin_user))
                     ),
                 )
             if isinstance(support_data, dict) and support_data:
+                channel_id = normalize_channel_settings(
+                    {"channel_id": support_data.get("channel_id")}
+                )["channel_id"]
                 channel_url = str(support_data.get("channel_url") or "").strip()[:1000]
                 support_url = str(support_data.get("support_url") or "").strip()[:1000]
+                check_subscription_enabled = 1 if bool(support_data.get("check_subscription_enabled")) else 0
                 await cur.execute(
                     """
-                    INSERT INTO admin_support_links (id, channel_url, support_url, updated_by)
-                    VALUES (1, %s, %s, %s)
+                    INSERT INTO admin_support_links (
+                        id, channel_id, channel_url, support_url, check_subscription_enabled, updated_by
+                    )
+                    VALUES (1, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
+                        channel_id = VALUES(channel_id),
                         channel_url = VALUES(channel_url),
                         support_url = VALUES(support_url),
+                        check_subscription_enabled = VALUES(check_subscription_enabled),
                         updated_by = VALUES(updated_by)
                     """,
-                    (channel_url, support_url, int(admin["user_id"])),
+                    (channel_id, channel_url, support_url, check_subscription_enabled, int(admin["user_id"])),
                 )
             if isinstance(pocket_data, dict) and pocket_data:
                 partner_id = str(pocket_data.get("partner_id") or "").strip()[:64]
@@ -4114,10 +4151,147 @@ async def update_analysis_status(request: Request, user=Depends(get_telegram_use
                 WHERE id = %s AND user_id = %s
             """, (status, analysis_id, user_id))
     return {"status": "success"}
-    
+
+
+FUNNEL_CHECK_CHANNEL_CALLBACK = "funnel_check_channel"
+FUNNEL_CONTINUE_CALLBACK = "funnel_continue"
+
+
+async def build_main_menu_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    keyboard_rows = [
+        [
+            InlineKeyboardButton(
+                text="Open Eric Cole",
+                web_app=WebAppInfo(url=os.getenv("WEB_APP_URL")),
+            )
+        ]
+    ]
+    if await is_admin_user(user_id):
+        keyboard_rows.append(
+            [
+                InlineKeyboardButton(
+                    text="Admin Center",
+                    web_app=WebAppInfo(url=build_admin_webapp_url()),
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+
+
+async def send_main_menu(chat_id: int, user_id: int, user_name: str):
+    global menu_photo_file_id
+    welcome_text = (
+        f"Welcome, {user_name}!\n\n"
+        f"<b>Eric Cole</b> | <code>Private Trading Analytics</code>\n\n"
+        f"A professional analytical space for those who value precision. "
+        f"We've combined advanced technical analysis methods with the convenience of a Web App.\n\n"
+        f"<i>Your market edge begins here.</i>"
+    )
+    keyboard = await build_main_menu_keyboard(user_id)
+
+    if menu_photo_file_id:
+        await bot.send_photo(
+            chat_id=chat_id,
+            photo=menu_photo_file_id,
+            caption=welcome_text,
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
+        return
+
+    photo_path = resolve_menu_photo_path()
+    sent_message = await bot.send_photo(
+        chat_id=chat_id,
+        photo=FSInputFile(photo_path),
+        caption=welcome_text,
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+    if sent_message and sent_message.photo:
+        menu_photo_file_id = sent_message.photo[-1].file_id
+        try:
+            with open(menu_file_id_path, "w", encoding="utf-8") as f:
+                f.write(menu_photo_file_id)
+        except Exception:
+            pass
+
+
+async def get_onboarding_row(user_id: int) -> Optional[Dict[str, Any]]:
+    if not db_pool:
+        return None
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT user_id, quiz_name, quiz_age, quiz_experience, current_step,
+                       quiz_completed_at, channel_subscribed_at, channel_gate_completed_at
+                FROM user_onboarding
+                WHERE user_id = %s
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            return await cur.fetchone()
+
+
+async def ensure_onboarding_row(user_id: int) -> Dict[str, Any]:
+    if not db_pool:
+        return {}
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT IGNORE INTO user_onboarding (user_id, current_step)
+                VALUES (%s, 'name')
+                """,
+                (user_id,),
+            )
+    return await get_onboarding_row(user_id) or {}
+
+
+async def send_quiz_question(chat_id: int, step: str):
+    await bot.send_message(chat_id=chat_id, text=get_quiz_question(step))
+
+
+async def send_channel_gate(chat_id: int):
+    settings = await get_support_links_row()
+    keyboard_rows = [
+        [InlineKeyboardButton(text="Открыть канал", url=settings["channel_url"])],
+    ]
+    if settings["check_subscription_enabled"]:
+        keyboard_rows.append(
+            [InlineKeyboardButton(text="Проверить подписку", callback_data=FUNNEL_CHECK_CHANNEL_CALLBACK)]
+        )
+    else:
+        keyboard_rows.append(
+            [InlineKeyboardButton(text="Продолжить", callback_data=FUNNEL_CONTINUE_CALLBACK)]
+        )
+    await bot.send_message(
+        chat_id=chat_id,
+        text="Чтобы продолжить, подпишитесь на наш Telegram-канал.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_rows),
+    )
+
+
+async def route_user_after_start(message: types.Message, user_id: int, user_name: str):
+    if not db_pool:
+        await send_main_menu(message.chat.id, user_id, user_name)
+        return
+
+    row = await ensure_onboarding_row(user_id)
+    if not row.get("quiz_completed_at"):
+        await send_quiz_question(message.chat.id, row.get("current_step") or "name")
+        return
+
+    if row.get("channel_gate_completed_at"):
+        await send_main_menu(message.chat.id, user_id, user_name)
+        return
+
+    await send_channel_gate(message.chat.id)
+
+
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
-    global menu_photo_file_id
     user_name = message.from_user.first_name or message.from_user.username or "Trader"
     user_id = int(message.from_user.id)
     username = message.from_user.username or ""
@@ -4152,57 +4326,124 @@ async def cmd_start(message: types.Message):
                 )
 
     asyncio.create_task(send_aio_postback_event(user_id, "bot_start"))
+    await route_user_after_start(message, user_id, user_name)
 
-    welcome_text = (
-        f"Welcome, {user_name}!\n\n"
-        f"<b>Eric Cole</b> | <code>Private Trading Analytics</code>\n\n"
-        f"A professional analytical space for those who value precision. "
-        f"We've combined advanced technical analysis methods with the convenience of a Web App.\n\n"
-        f"<i>Your market edge begins here.</i>"
-    )
 
-    keyboard_rows = [
-        [
-            InlineKeyboardButton(
-                text="Open Eric Cole",
-                web_app=WebAppInfo(url=os.getenv("WEB_APP_URL"))
-            )
-        ]
-    ]
-    if await is_admin_user(user_id):
-        keyboard_rows.append(
-            [
-                InlineKeyboardButton(
-                    text="Admin Center",
-                    web_app=WebAppInfo(url=build_admin_webapp_url())
+@dp.message()
+async def handle_onboarding_answer(message: types.Message):
+    if not db_pool or not message.from_user:
+        return
+    user_id = int(message.from_user.id)
+    row = await get_onboarding_row(user_id)
+    if not row or row.get("quiz_completed_at"):
+        return
+
+    current_step = row.get("current_step") or "name"
+    try:
+        answer = normalize_quiz_answer(current_step, message.text)
+    except ValueError:
+        await message.answer("Пожалуйста, отправьте корректный ответ.")
+        await send_quiz_question(message.chat.id, current_step)
+        return
+
+    next_step = get_next_quiz_step(current_step)
+    field_map = {
+        "name": "quiz_name",
+        "age": "quiz_age",
+        "experience": "quiz_experience",
+    }
+    field_name = field_map[current_step]
+
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            if next_step:
+                await cur.execute(
+                    f"""
+                    UPDATE user_onboarding
+                    SET {field_name} = %s,
+                        current_step = %s
+                    WHERE user_id = %s
+                    """,
+                    (answer, next_step, user_id),
                 )
-            ]
-        )
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+            else:
+                await cur.execute(
+                    f"""
+                    UPDATE user_onboarding
+                    SET {field_name} = %s,
+                        current_step = 'completed',
+                        quiz_completed_at = COALESCE(quiz_completed_at, NOW())
+                    WHERE user_id = %s
+                    """,
+                    (answer, user_id),
+                )
 
-    if menu_photo_file_id:
-        await message.answer_photo(
-            photo=menu_photo_file_id,
-            caption=welcome_text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
+    if next_step:
+        await send_quiz_question(message.chat.id, next_step)
+        return
+
+    asyncio.create_task(send_aio_postback_event(user_id, QUIZ_COMPLETE_EVENT))
+    await message.answer("Спасибо! Остался последний шаг.")
+    await send_channel_gate(message.chat.id)
+
+
+@dp.callback_query(lambda callback: callback.data == FUNNEL_CONTINUE_CALLBACK)
+async def handle_funnel_continue(callback: types.CallbackQuery):
+    if callback.message and callback.from_user:
+        if db_pool:
+            async with db_pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        UPDATE user_onboarding
+                        SET channel_gate_completed_at = COALESCE(channel_gate_completed_at, NOW())
+                        WHERE user_id = %s
+                        """,
+                        (int(callback.from_user.id),),
+                    )
+        user_name = callback.from_user.first_name or callback.from_user.username or "Trader"
+        await callback.answer()
+        await send_main_menu(callback.message.chat.id, int(callback.from_user.id), user_name)
+
+
+@dp.callback_query(lambda callback: callback.data == FUNNEL_CHECK_CHANNEL_CALLBACK)
+async def handle_funnel_check_channel(callback: types.CallbackQuery):
+    if not callback.message or not callback.from_user:
+        return
+    user_id = int(callback.from_user.id)
+    settings = await get_support_links_row()
+    try:
+        member = await bot.get_chat_member(chat_id=settings["channel_id"], user_id=user_id)
+        is_subscribed = is_active_channel_member(getattr(member, "status", None))
+    except Exception as e:
+        print(f"[Funnel] Channel subscription check failed: {e}")
+        await callback.answer(
+            "Не получилось проверить подписку. Попробуйте еще раз через минуту.",
+            show_alert=True,
         )
         return
 
-    photo_path = resolve_menu_photo_path()
-    sent_message = await message.answer_photo(
-        photo=FSInputFile(photo_path),
-        caption=welcome_text,
-        reply_markup=keyboard,
-        parse_mode="HTML"
-    )
-    if sent_message and sent_message.photo:
-        menu_photo_file_id = sent_message.photo[-1].file_id
-        try:
-            with open(menu_file_id_path, "w", encoding="utf-8") as f:
-                f.write(menu_photo_file_id)
-        except Exception:
-            pass
+    if not is_subscribed:
+        await callback.answer("Подписка пока не найдена.", show_alert=True)
+        return
+
+    if db_pool:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    UPDATE user_onboarding
+                    SET channel_subscribed_at = COALESCE(channel_subscribed_at, NOW()),
+                        channel_gate_completed_at = COALESCE(channel_gate_completed_at, NOW())
+                    WHERE user_id = %s
+                    """,
+                    (user_id,),
+                )
+
+    asyncio.create_task(send_aio_postback_event(user_id, CHANNEL_SUBSCRIBE_EVENT))
+    user_name = callback.from_user.first_name or callback.from_user.username or "Trader"
+    await callback.answer("Подписка подтверждена.")
+    await send_main_menu(callback.message.chat.id, user_id, user_name)
 
 class AIChatRequest(BaseModel):
     user_id: Optional[int] = None
