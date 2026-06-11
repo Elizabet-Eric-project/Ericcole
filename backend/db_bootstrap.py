@@ -5,6 +5,10 @@ try:
     from backend.analysis_ai_service import DEFAULT_ANALYSIS_GPT_MODEL, DEFAULT_ANALYSIS_GPT_PROMPT
 except ModuleNotFoundError:
     from analysis_ai_service import DEFAULT_ANALYSIS_GPT_MODEL, DEFAULT_ANALYSIS_GPT_PROMPT
+try:
+    from backend.bot_funnel import DEFAULT_CHANNEL_ID, DEFAULT_CHANNEL_URL, DEFAULT_CHECK_SUBSCRIPTION_ENABLED
+except ModuleNotFoundError:
+    from bot_funnel import DEFAULT_CHANNEL_ID, DEFAULT_CHANNEL_URL, DEFAULT_CHECK_SUBSCRIPTION_ENABLED
 
 
 async def _get_current_db_name(conn) -> str:
@@ -14,6 +18,13 @@ async def _get_current_db_name(conn) -> str:
     if not row or not row[0]:
         raise RuntimeError("Database name is not selected")
     return str(row[0])
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int((os.getenv(name) or "").strip() or default)
+    except (TypeError, ValueError):
+        return default
 
 
 async def _column_exists(conn, db_name: str, table_name: str, column_name: str) -> bool:
@@ -260,9 +271,28 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                 """
                 CREATE TABLE IF NOT EXISTS admin_support_links (
                     id INT NOT NULL PRIMARY KEY,
+                    channel_id BIGINT NULL,
                     channel_url TEXT NULL,
                     support_url TEXT NULL,
+                    check_subscription_enabled TINYINT(1) NOT NULL DEFAULT 1,
                     updated_by BIGINT NULL,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_onboarding (
+                    user_id BIGINT NOT NULL PRIMARY KEY,
+                    quiz_name VARCHAR(255) NULL,
+                    quiz_age INT NULL,
+                    quiz_experience VARCHAR(255) NULL,
+                    current_step VARCHAR(32) NOT NULL DEFAULT 'name',
+                    quiz_completed_at TIMESTAMP NULL DEFAULT NULL,
+                    channel_subscribed_at TIMESTAMP NULL DEFAULT NULL,
+                    channel_gate_completed_at TIMESTAMP NULL DEFAULT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
@@ -340,6 +370,9 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
         await _ensure_column(conn, db_name, "users", "is_blocked", "ALTER TABLE users ADD COLUMN is_blocked TINYINT(1) NOT NULL DEFAULT 0")
         await _ensure_column(conn, db_name, "users", "blocked_by", "ALTER TABLE users ADD COLUMN blocked_by BIGINT NULL")
         await _ensure_column(conn, db_name, "users", "blocked_at", "ALTER TABLE users ADD COLUMN blocked_at TIMESTAMP NULL DEFAULT NULL")
+        await _ensure_column(conn, db_name, "admin_support_links", "channel_id", "ALTER TABLE admin_support_links ADD COLUMN channel_id BIGINT NULL")
+        await _ensure_column(conn, db_name, "admin_support_links", "check_subscription_enabled", "ALTER TABLE admin_support_links ADD COLUMN check_subscription_enabled TINYINT(1) NOT NULL DEFAULT 1")
+        await _ensure_column(conn, db_name, "user_onboarding", "channel_gate_completed_at", "ALTER TABLE user_onboarding ADD COLUMN channel_gate_completed_at TIMESTAMP NULL DEFAULT NULL")
         await _ensure_column(
             conn,
             db_name,
@@ -818,15 +851,21 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
 
             await cur.execute(
                 """
-                INSERT INTO admin_support_links (id, channel_url, support_url, updated_by)
-                VALUES (1, %s, %s, NULL)
+                INSERT INTO admin_support_links (
+                    id, channel_id, channel_url, support_url, check_subscription_enabled, updated_by
+                )
+                VALUES (1, %s, %s, %s, %s, NULL)
                 ON DUPLICATE KEY UPDATE
+                    channel_id = COALESCE(channel_id, VALUES(channel_id)),
                     channel_url = COALESCE(NULLIF(channel_url, ''), VALUES(channel_url)),
-                    support_url = COALESCE(NULLIF(support_url, ''), VALUES(support_url))
+                    support_url = COALESCE(NULLIF(support_url, ''), VALUES(support_url)),
+                    check_subscription_enabled = COALESCE(check_subscription_enabled, VALUES(check_subscription_enabled))
                 """,
                 (
-                    (os.getenv("CHANNEL_URL") or "").strip(),
+                    _env_int("CHANNEL_ID", DEFAULT_CHANNEL_ID),
+                    (os.getenv("CHANNEL_URL") or "").strip() or DEFAULT_CHANNEL_URL,
                     (os.getenv("SUPPORT_URL") or "").strip(),
+                    _env_int("CHECK_SUBSCRIPTION_ENABLED", DEFAULT_CHECK_SUBSCRIPTION_ENABLED),
                 ),
             )
 
