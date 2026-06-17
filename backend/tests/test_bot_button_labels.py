@@ -10,6 +10,13 @@ class BotButtonLabelsTest(unittest.TestCase):
         self.assertIn('text="open app"', backend_main.read_text(encoding="utf-8"))
         self.assertIn('text="open app"', root_main.read_text(encoding="utf-8"))
 
+    def test_channel_gate_continue_button_is_go_to_trading(self):
+        backend_main = Path(__file__).resolve().parents[1] / "main.py"
+        source = backend_main.read_text(encoding="utf-8")
+
+        self.assertIn('text="Go to trading"', source)
+        self.assertNotIn('text="Продолжить"', source)
+
 
 if __name__ == "__main__":
     unittest.main()
