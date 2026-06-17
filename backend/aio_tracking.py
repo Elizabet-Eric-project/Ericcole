@@ -10,6 +10,8 @@ AIO_VISIT_UUID_RE = re.compile(
 )
 AIO_EVENT_SLUG_RE = re.compile(r"^[a-z0-9_][a-z0-9_-]{0,63}$")
 AIO_POSTBACK_BASE_URL = "https://app.aio.tech/api/v1/trigger/conversion-request"
+AIO_FIELD_TRIGGER_BASE_URL = "https://app.aio.tech/api/v1/trigger/field"
+AIO_USER_FIELD_NAMES = frozenset({"tg_first_name", "tg_username", "tgid"})
 
 
 def normalize_aio_visit_uuid(value: Optional[str]) -> Optional[str]:
@@ -83,3 +85,17 @@ def build_aio_postback_url(
         params["unique"] = normalized_unique_key
 
     return f"{AIO_POSTBACK_BASE_URL}?{urlencode(params)}"
+
+
+def build_aio_field_trigger_url(aio_visit_uuid: str, field_name: str, field_value: object) -> str:
+    visit_uuid = normalize_aio_visit_uuid(aio_visit_uuid)
+    normalized_field_name = str(field_name or "").strip()
+    if not visit_uuid:
+        raise ValueError("AIO visit UUID is invalid")
+    if normalized_field_name not in AIO_USER_FIELD_NAMES:
+        raise ValueError("AIO field name is invalid")
+
+    return (
+        f"{AIO_FIELD_TRIGGER_BASE_URL}/{visit_uuid}/"
+        f"?{urlencode({normalized_field_name: str(field_value if field_value is not None else '')})}"
+    )
