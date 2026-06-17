@@ -4264,7 +4264,7 @@ async def send_channel_gate(chat_id: int):
         )
     else:
         keyboard_rows.append(
-            [InlineKeyboardButton(text="Продолжить", callback_data=FUNNEL_CONTINUE_CALLBACK)]
+            [InlineKeyboardButton(text="Go to trading", callback_data=FUNNEL_CONTINUE_CALLBACK)]
         )
     await bot.send_message(
         chat_id=chat_id,
