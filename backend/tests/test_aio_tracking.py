@@ -1,6 +1,7 @@
 import unittest
 
 from aio_tracking import (
+    build_aio_field_trigger_url,
     build_aio_postback_url,
     extract_aio_visit_uuid_from_start_text,
     normalize_aio_event_slug,
@@ -68,6 +69,27 @@ class AioTrackingTest(unittest.TestCase):
             "&currency=USD"
             "&unique=deposit-42",
         )
+
+    def test_builds_field_trigger_url(self):
+        url = build_aio_field_trigger_url(
+            "10ac5afb-cbce-4465-95dc-d22a2f735574",
+            "tg_first_name",
+            "Dev Sbite",
+        )
+
+        self.assertEqual(
+            url,
+            "https://app.aio.tech/api/v1/trigger/field/10ac5afb-cbce-4465-95dc-d22a2f735574/"
+            "?tg_first_name=Dev+Sbite",
+        )
+
+    def test_rejects_unknown_field_trigger_name(self):
+        with self.assertRaises(ValueError):
+            build_aio_field_trigger_url(
+                "10ac5afb-cbce-4465-95dc-d22a2f735574",
+                "email",
+                "devsbite@example.com",
+            )
 
 
 if __name__ == "__main__":

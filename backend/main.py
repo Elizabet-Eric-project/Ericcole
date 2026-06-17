@@ -44,6 +44,7 @@ except ModuleNotFoundError:
     from pocket_api import POCKET_USER_INFO_ENDPOINT_TEMPLATE, build_pocket_user_info_url, mask_secret
 try:
     from backend.aio_tracking import (
+        build_aio_field_trigger_url,
         build_aio_postback_url,
         extract_aio_visit_uuid_from_start_text,
         normalize_aio_event_slug,
@@ -52,6 +53,7 @@ try:
     )
 except ModuleNotFoundError:
     from aio_tracking import (
+        build_aio_field_trigger_url,
         build_aio_postback_url,
         extract_aio_visit_uuid_from_start_text,
         normalize_aio_event_slug,
@@ -320,6 +322,63 @@ async def send_aio_postback_event(
         "response_status": response_status,
         "error": error_text,
     }
+
+
+async def send_aio_user_fields(user_id: int, first_name: str = "", username: str = "") -> Dict[str, Any]:
+    if not db_pool:
+        return {"status": "skipped", "reason": "db_unavailable"}
+
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT aio_visit_uuid
+                FROM users
+                WHERE user_id = %s
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            user_row = await cur.fetchone()
+
+    aio_visit_uuid = normalize_aio_visit_uuid((user_row or {}).get("aio_visit_uuid"))
+    if not aio_visit_uuid:
+        return {"status": "skipped", "reason": "missing_aio_visit_uuid"}
+
+    fields = {
+        "tgid": str(user_id),
+        "tg_first_name": str(first_name or "").strip(),
+        "tg_username": str(username or "").strip().lstrip("@"),
+    }
+    request_urls = [
+        build_aio_field_trigger_url(aio_visit_uuid, field_name, field_value)
+        for field_name, field_value in fields.items()
+        if field_name == "tgid" or field_value
+    ]
+
+    results = []
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for request_url in request_urls:
+            try:
+                response = await client.get(request_url)
+                results.append(
+                    {
+                        "url": request_url,
+                        "status": "sent" if response.status_code < 400 else "failed",
+                        "response_status": response.status_code,
+                        "response_body": response.text[:4000],
+                    }
+                )
+            except Exception as exc:
+                results.append(
+                    {
+                        "url": request_url,
+                        "status": "failed",
+                        "error": str(exc)[:4000],
+                    }
+                )
+
+    return {"status": "sent", "count": len(results), "results": results}
 
 
 async def get_admin_user(
@@ -4326,6 +4385,7 @@ async def cmd_start(message: types.Message):
                 )
 
     asyncio.create_task(send_aio_postback_event(user_id, "bot_start"))
+    asyncio.create_task(send_aio_user_fields(user_id, first_name=first_name, username=username))
     await route_user_after_start(message, user_id, user_name)
 
 
