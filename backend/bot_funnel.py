@@ -1,3 +1,4 @@
+import re
 from typing import Any, Dict, Optional
 
 
@@ -9,51 +10,164 @@ DEFAULT_CHANNEL_ID = -1003584421739
 DEFAULT_CHANNEL_URL = "https://t.me/+sUmNRVpk63M1Y2E1"
 DEFAULT_CHECK_SUBSCRIPTION_ENABLED = 1
 
-QUIZ_STEPS = ("name", "age", "experience")
+QUIZ_STEPS = ("experience", "broker_experience", "capital")
+QUIZ_AIO_FIELDS = {
+    "experience": "tg_question1",
+    "broker_experience": "tg_question2",
+    "capital": "tg_question3",
+}
 QUIZ_QUESTIONS = {
-    "name": "Как вас зовут?",
-    "age": "Сколько вам лет?",
-    "experience": "Есть ли у вас опыт в трейдинге?",
+    "experience": "What is your trading experience?",
+    "broker_experience": "Have you worked with any of these brokers before?",
+    "capital": "What is your trading capital (deposit)?\nThis helps us suggest a more relevant broker setup later.",
+}
+QUIZ_OPTIONS = {
+    "experience": (
+        "I have no experience",
+        "Less than 1 year",
+        "1-2 years",
+        "2-5 years",
+        "More than 5 years",
+        "Skip",
+    ),
+    "broker_experience": (
+        "Broker 1",
+        "Broker 2",
+        "Broker 3",
+        "Other broker",
+        "I have not worked with a broker",
+        "Skip",
+    ),
+    "capital": (
+        "Up to $100",
+        "$100-$1,000",
+        "$1,000-$10,000",
+        "$10,000-$100,000",
+        "$100,000+",
+        "Skip",
+    ),
+}
+SKIP_PHRASES = {
+    "skip",
+    "later",
+    "not now",
+    "no thanks",
+    "dont want",
+    "don't want",
+    "do not want",
+    "just send link",
+    "just send the link",
+    "send link",
+    "send the link",
+    "channel",
 }
 
 
-def get_quiz_question(step: Optional[str]) -> str:
+def normalize_quiz_step(step: Optional[str]) -> str:
     normalized_step = str(step or "").strip().lower()
-    return QUIZ_QUESTIONS.get(normalized_step, QUIZ_QUESTIONS["name"])
+    return normalized_step if normalized_step in QUIZ_STEPS else QUIZ_STEPS[0]
+
+
+def get_quiz_question(step: Optional[str]) -> str:
+    return QUIZ_QUESTIONS[normalize_quiz_step(step)]
+
+
+def get_quiz_options(step: Optional[str]) -> tuple[str, ...]:
+    return QUIZ_OPTIONS[normalize_quiz_step(step)]
+
+
+def get_aio_question_field(step: Optional[str]) -> str:
+    return QUIZ_AIO_FIELDS[normalize_quiz_step(step)]
 
 
 def get_next_quiz_step(step: Optional[str]) -> Optional[str]:
-    normalized_step = str(step or "").strip().lower()
-    if normalized_step not in QUIZ_STEPS:
-        return "name"
+    normalized_step = normalize_quiz_step(step)
     index = QUIZ_STEPS.index(normalized_step)
     if index + 1 >= len(QUIZ_STEPS):
         return None
     return QUIZ_STEPS[index + 1]
 
 
-def normalize_quiz_answer(step: str, value: Any) -> Any:
-    normalized_step = str(step or "").strip().lower()
+def is_skip_answer(value: Any) -> bool:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return False
+    normalized = re.sub(r"\s+", " ", normalized)
+    if normalized in SKIP_PHRASES:
+        return True
+    return any(phrase in normalized for phrase in ("just send", "send me the channel", "give me the link"))
+
+
+def normalize_quiz_answer(step: str, value: Any) -> str:
     text = str(value or "").strip()
     if not text:
         raise ValueError("answer is required")
+    if is_skip_answer(text):
+        return "Skip"
+    for option in get_quiz_options(step):
+        if option.lower() == text.lower():
+            return option
+    return text[:255]
 
-    if normalized_step == "name":
-        return text[:255]
 
-    if normalized_step == "age":
-        try:
-            age = int(text)
-        except (TypeError, ValueError):
-            raise ValueError("age must be a number")
-        if age < 10 or age > 100:
-            raise ValueError("age must be between 10 and 100")
-        return age
+def _extract_amount(text: str) -> Optional[float]:
+    match = re.search(r"(\d[\d\s,.]*)", text)
+    if not match:
+        return None
+    raw = match.group(1).replace(" ", "").replace(",", ".")
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def map_quiz_answer_locally(step: str, value: Any) -> Optional[str]:
+    normalized_step = normalize_quiz_step(step)
+    text = str(value or "").strip()
+    lowered = text.lower()
+    if not text:
+        return None
+    if is_skip_answer(text):
+        return "Skip"
 
     if normalized_step == "experience":
-        return text[:255]
+        if any(token in lowered for token in ("no experience", "beginner", "newbie", "novice", "never traded")):
+            return "I have no experience"
+        if "less" in lowered or "under" in lowered or "few month" in lowered:
+            return "Less than 1 year"
+        if ("1" in lowered and "2" in lowered) or "one" in lowered or "two" in lowered:
+            return "1-2 years"
+        if "2" in lowered and "5" in lowered:
+            return "2-5 years"
+        if any(token in lowered for token in ("more than 5", "over 5", "5+", "six", "seven", "expert")):
+            return "More than 5 years"
 
-    raise ValueError("unknown quiz step")
+    if normalized_step == "broker_experience":
+        if any(token in lowered for token in ("no broker", "not worked", "never", "none", "haven't", "have not")):
+            return "I have not worked with a broker"
+        for option in ("Broker 1", "Broker 2", "Broker 3"):
+            if option.lower() in lowered:
+                return option
+        if "other" in lowered or "another" in lowered:
+            return "Other broker"
+
+    if normalized_step == "capital":
+        amount = _extract_amount(lowered)
+        if amount is not None:
+            if amount <= 100:
+                return "Up to $100"
+            if amount <= 1000:
+                return "$100-$1,000"
+            if amount <= 10000:
+                return "$1,000-$10,000"
+            if amount <= 100000:
+                return "$10,000-$100,000"
+            return "$100,000+"
+
+    for option in get_quiz_options(normalized_step):
+        if option.lower() == lowered:
+            return option
+    return None
 
 
 def normalize_channel_id(value: Any) -> int:

@@ -83,6 +83,19 @@ class AioTrackingTest(unittest.TestCase):
             "?tg_first_name=Dev+Sbite",
         )
 
+    def test_builds_question_field_trigger_url(self):
+        url = build_aio_field_trigger_url(
+            "10ac5afb-cbce-4465-95dc-d22a2f735574",
+            "tg_question10",
+            "$100-$1,000",
+        )
+
+        self.assertEqual(
+            url,
+            "https://app.aio.tech/api/v1/trigger/field/10ac5afb-cbce-4465-95dc-d22a2f735574/"
+            "?tg_question10=%24100-%241%2C000",
+        )
+
     def test_rejects_unknown_field_trigger_name(self):
         with self.assertRaises(ValueError):
             build_aio_field_trigger_url(

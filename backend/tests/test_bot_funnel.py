@@ -5,8 +5,12 @@ from bot_funnel import (
     DEFAULT_CHANNEL_ID,
     DEFAULT_CHANNEL_URL,
     QUIZ_COMPLETE_EVENT,
+    get_aio_question_field,
+    get_quiz_options,
     get_quiz_question,
+    is_skip_answer,
     is_active_channel_member,
+    map_quiz_answer_locally,
     normalize_channel_settings,
     normalize_quiz_answer,
 )
@@ -14,20 +18,39 @@ from bot_funnel import (
 
 class BotFunnelTest(unittest.TestCase):
     def test_quiz_questions_are_ordered(self):
-        self.assertEqual(get_quiz_question("name"), "Как вас зовут?")
-        self.assertEqual(get_quiz_question("age"), "Сколько вам лет?")
-        self.assertEqual(get_quiz_question("experience"), "Есть ли у вас опыт в трейдинге?")
+        self.assertEqual(get_quiz_question("experience"), "What is your trading experience?")
+        self.assertEqual(get_quiz_question("broker_experience"), "Have you worked with any of these brokers before?")
+        self.assertEqual(
+            get_quiz_question("capital"),
+            "What is your trading capital (deposit)?\nThis helps us suggest a more relevant broker setup later.",
+        )
 
     def test_normalizes_quiz_answers(self):
-        self.assertEqual(normalize_quiz_answer("name", "  Codex  "), "Codex")
-        self.assertEqual(normalize_quiz_answer("age", "25"), 25)
-        self.assertEqual(normalize_quiz_answer("experience", "  Есть  "), "Есть")
+        self.assertEqual(normalize_quiz_answer("experience", "  Less than 1 year  "), "Less than 1 year")
+        self.assertEqual(normalize_quiz_answer("broker_experience", "Other broker"), "Other broker")
+        self.assertEqual(normalize_quiz_answer("capital", "$100-$1,000"), "$100-$1,000")
 
-    def test_rejects_invalid_age(self):
-        with self.assertRaises(ValueError):
-            normalize_quiz_answer("age", "abc")
-        with self.assertRaises(ValueError):
-            normalize_quiz_answer("age", "8")
+    def test_quiz_options_include_skip(self):
+        self.assertIn("Skip", get_quiz_options("experience"))
+        self.assertIn("I have not worked with a broker", get_quiz_options("broker_experience"))
+        self.assertIn("$100,000+", get_quiz_options("capital"))
+
+    def test_maps_free_text_answers_locally(self):
+        self.assertEqual(map_quiz_answer_locally("experience", "I am a total beginner"), "I have no experience")
+        self.assertEqual(map_quiz_answer_locally("experience", "about two years"), "1-2 years")
+        self.assertEqual(map_quiz_answer_locally("capital", "500 dollars"), "$100-$1,000")
+        self.assertEqual(map_quiz_answer_locally("broker_experience", "never used one"), "I have not worked with a broker")
+
+    def test_detects_skip_answers(self):
+        self.assertTrue(is_skip_answer("later"))
+        self.assertTrue(is_skip_answer("just send the link"))
+        self.assertTrue(is_skip_answer("Skip"))
+        self.assertFalse(is_skip_answer("Less than 1 year"))
+
+    def test_maps_steps_to_aio_question_fields(self):
+        self.assertEqual(get_aio_question_field("experience"), "tg_question1")
+        self.assertEqual(get_aio_question_field("broker_experience"), "tg_question2")
+        self.assertEqual(get_aio_question_field("capital"), "tg_question3")
 
     def test_normalizes_channel_settings_with_defaults(self):
         settings = normalize_channel_settings({})

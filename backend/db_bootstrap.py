@@ -288,7 +288,9 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     quiz_name VARCHAR(255) NULL,
                     quiz_age INT NULL,
                     quiz_experience VARCHAR(255) NULL,
-                    current_step VARCHAR(32) NOT NULL DEFAULT 'name',
+                    quiz_broker_experience VARCHAR(255) NULL,
+                    quiz_capital VARCHAR(255) NULL,
+                    current_step VARCHAR(32) NOT NULL DEFAULT 'experience',
                     quiz_completed_at TIMESTAMP NULL DEFAULT NULL,
                     channel_subscribed_at TIMESTAMP NULL DEFAULT NULL,
                     channel_gate_completed_at TIMESTAMP NULL DEFAULT NULL,
@@ -372,6 +374,8 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
         await _ensure_column(conn, db_name, "users", "blocked_at", "ALTER TABLE users ADD COLUMN blocked_at TIMESTAMP NULL DEFAULT NULL")
         await _ensure_column(conn, db_name, "admin_support_links", "channel_id", "ALTER TABLE admin_support_links ADD COLUMN channel_id BIGINT NULL")
         await _ensure_column(conn, db_name, "admin_support_links", "check_subscription_enabled", "ALTER TABLE admin_support_links ADD COLUMN check_subscription_enabled TINYINT(1) NOT NULL DEFAULT 1")
+        await _ensure_column(conn, db_name, "user_onboarding", "quiz_broker_experience", "ALTER TABLE user_onboarding ADD COLUMN quiz_broker_experience VARCHAR(255) NULL")
+        await _ensure_column(conn, db_name, "user_onboarding", "quiz_capital", "ALTER TABLE user_onboarding ADD COLUMN quiz_capital VARCHAR(255) NULL")
         await _ensure_column(conn, db_name, "user_onboarding", "channel_gate_completed_at", "ALTER TABLE user_onboarding ADD COLUMN channel_gate_completed_at TIMESTAMP NULL DEFAULT NULL")
         await _ensure_column(
             conn,
