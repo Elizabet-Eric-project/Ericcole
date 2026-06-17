@@ -4161,7 +4161,7 @@ async def build_main_menu_keyboard(user_id: int) -> InlineKeyboardMarkup:
     keyboard_rows = [
         [
             InlineKeyboardButton(
-                text="Open Eric Cole",
+                text="open app",
                 web_app=WebAppInfo(url=os.getenv("WEB_APP_URL")),
             )
         ]
