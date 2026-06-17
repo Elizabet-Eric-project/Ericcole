@@ -672,7 +672,7 @@ async def cmd_start(message: types.Message):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text="open app",
+                text="Open ERIC COLE",
                 web_app=WebAppInfo(url=os.getenv("WEB_APP_URL"))
             )
         ]
@@ -782,6 +782,17 @@ async def create_new_chat(request: AIChatRequest, user=Depends(get_telegram_user
     return {"status": "success", "chat_id": chat_id, "title": "РќРѕРІС‹Р№ РґРёР°Р»РѕРі", "messages": []}
     
 async def start_bot():
+    web_app_url = (os.getenv("WEB_APP_URL") or "").strip()
+    if web_app_url:
+        try:
+            await bot.set_chat_menu_button(
+                menu_button=types.MenuButtonWebApp(
+                    text="Open APP",
+                    web_app=WebAppInfo(url=web_app_url),
+                )
+            )
+        except Exception as e:
+            print(f"[Bot] set_chat_menu_button error: {e}")
     await dp.start_polling(bot)
 
 async def start_api():
