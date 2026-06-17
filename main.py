@@ -672,7 +672,7 @@ async def cmd_start(message: types.Message):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text="Open Eric Cole",
+                text="open app",
                 web_app=WebAppInfo(url=os.getenv("WEB_APP_URL"))
             )
         ]
