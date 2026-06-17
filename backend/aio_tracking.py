@@ -11,7 +11,9 @@ AIO_VISIT_UUID_RE = re.compile(
 AIO_EVENT_SLUG_RE = re.compile(r"^[a-z0-9_][a-z0-9_-]{0,63}$")
 AIO_POSTBACK_BASE_URL = "https://app.aio.tech/api/v1/trigger/conversion-request"
 AIO_FIELD_TRIGGER_BASE_URL = "https://app.aio.tech/api/v1/trigger/field"
-AIO_USER_FIELD_NAMES = frozenset({"tg_first_name", "tg_username", "tgid"})
+AIO_USER_FIELD_NAMES = frozenset(
+    {"tg_first_name", "tg_username", "tgid"} | {f"tg_question{index}" for index in range(1, 11)}
+)
 
 
 def normalize_aio_visit_uuid(value: Optional[str]) -> Optional[str]:

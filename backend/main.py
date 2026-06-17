@@ -65,9 +65,14 @@ try:
         CHANNEL_SUBSCRIBE_EVENT,
         QUIZ_COMPLETE_EVENT,
         get_next_quiz_step,
+        get_aio_question_field,
+        get_quiz_options,
         get_quiz_question,
+        is_skip_answer,
         is_active_channel_member,
+        map_quiz_answer_locally,
         normalize_channel_settings,
+        normalize_quiz_step,
         normalize_quiz_answer,
     )
 except ModuleNotFoundError:
@@ -75,9 +80,14 @@ except ModuleNotFoundError:
         CHANNEL_SUBSCRIBE_EVENT,
         QUIZ_COMPLETE_EVENT,
         get_next_quiz_step,
+        get_aio_question_field,
+        get_quiz_options,
         get_quiz_question,
+        is_skip_answer,
         is_active_channel_member,
+        map_quiz_answer_locally,
         normalize_channel_settings,
+        normalize_quiz_step,
         normalize_quiz_answer,
     )
 
@@ -379,6 +389,44 @@ async def send_aio_user_fields(user_id: int, first_name: str = "", username: str
                 )
 
     return {"status": "sent", "count": len(results), "results": results}
+
+
+async def send_aio_field_value(user_id: int, field_name: str, field_value: object) -> Dict[str, Any]:
+    if not db_pool:
+        return {"status": "skipped", "reason": "db_unavailable"}
+
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT aio_visit_uuid
+                FROM users
+                WHERE user_id = %s
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            user_row = await cur.fetchone()
+
+    aio_visit_uuid = normalize_aio_visit_uuid((user_row or {}).get("aio_visit_uuid"))
+    if not aio_visit_uuid:
+        return {"status": "skipped", "reason": "missing_aio_visit_uuid"}
+
+    try:
+        request_url = build_aio_field_trigger_url(aio_visit_uuid, field_name, field_value)
+    except ValueError as exc:
+        return {"status": "skipped", "reason": str(exc)}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(request_url)
+        return {
+            "status": "sent" if response.status_code < 400 else "failed",
+            "response_status": response.status_code,
+            "response_body": response.text[:4000],
+        }
+    except Exception as exc:
+        return {"status": "failed", "error": str(exc)[:4000]}
 
 
 async def get_admin_user(
@@ -4214,6 +4262,13 @@ async def update_analysis_status(request: Request, user=Depends(get_telegram_use
 
 FUNNEL_CHECK_CHANNEL_CALLBACK = "funnel_check_channel"
 FUNNEL_CONTINUE_CALLBACK = "funnel_continue"
+QUIZ_ANSWER_CALLBACK_PREFIX = "quiz_answer"
+QUALIFICATION_GPT_SYSTEM_PROMPT = """
+You classify one Telegram qualification answer for Eric Cole's trading project.
+Return exactly one allowed option and nothing else.
+If the user does not want to answer, asks to skip, says later, or asks for the channel link, return Skip.
+Do not explain your reasoning.
+""".strip()
 
 
 async def build_main_menu_keyboard(user_id: int) -> InlineKeyboardMarkup:
@@ -4282,7 +4337,7 @@ async def get_onboarding_row(user_id: int) -> Optional[Dict[str, Any]]:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute(
                 """
-                SELECT user_id, quiz_name, quiz_age, quiz_experience, current_step,
+                SELECT user_id, quiz_name, quiz_age, quiz_experience, quiz_broker_experience, quiz_capital, current_step,
                        quiz_completed_at, channel_subscribed_at, channel_gate_completed_at
                 FROM user_onboarding
                 WHERE user_id = %s
@@ -4301,7 +4356,7 @@ async def ensure_onboarding_row(user_id: int) -> Dict[str, Any]:
             await cur.execute(
                 """
                 INSERT IGNORE INTO user_onboarding (user_id, current_step)
-                VALUES (%s, 'name')
+                VALUES (%s, 'experience')
                 """,
                 (user_id,),
             )
@@ -4309,17 +4364,42 @@ async def ensure_onboarding_row(user_id: int) -> Dict[str, Any]:
 
 
 async def send_quiz_question(chat_id: int, step: str):
-    await bot.send_message(chat_id=chat_id, text=get_quiz_question(step))
+    normalized_step = normalize_quiz_step(step)
+    keyboard_rows = [
+        [
+            InlineKeyboardButton(
+                text=option,
+                callback_data=f"{QUIZ_ANSWER_CALLBACK_PREFIX}:{normalized_step}:{index}",
+            )
+        ]
+        for index, option in enumerate(get_quiz_options(normalized_step))
+    ]
+    await bot.send_message(
+        chat_id=chat_id,
+        text=get_quiz_question(normalized_step),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_rows),
+    )
+
+
+async def send_quiz_welcome(chat_id: int):
+    await bot.send_message(
+        chat_id=chat_id,
+        text=(
+            "Hi, this is Eric Cole's assistant.\n\n"
+            "To give you a more relevant starting point, I'll ask 3 quick questions.\n"
+            "If you prefer not to answer, that's okay - I can just send you the channel link."
+        ),
+    )
 
 
 async def send_channel_gate(chat_id: int):
     settings = await get_support_links_row()
     keyboard_rows = [
-        [InlineKeyboardButton(text="Открыть канал", url=settings["channel_url"])],
+        [InlineKeyboardButton(text="Open channel", url=settings["channel_url"])],
     ]
     if settings["check_subscription_enabled"]:
         keyboard_rows.append(
-            [InlineKeyboardButton(text="Проверить подписку", callback_data=FUNNEL_CHECK_CHANNEL_CALLBACK)]
+            [InlineKeyboardButton(text="Check subscription", callback_data=FUNNEL_CHECK_CHANNEL_CALLBACK)]
         )
     else:
         keyboard_rows.append(
@@ -4327,9 +4407,96 @@ async def send_channel_gate(chat_id: int):
         )
     await bot.send_message(
         chat_id=chat_id,
-        text="Чтобы продолжить, подпишитесь на наш Telegram-канал.",
+        text=f"Here is the channel link:\n{settings['channel_url']}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_rows),
     )
+
+
+async def map_quiz_answer_with_ai(step: str, text: str) -> Optional[str]:
+    local_answer = map_quiz_answer_locally(step, text)
+    if local_answer:
+        return local_answer
+
+    normalized_step = normalize_quiz_step(step)
+    options = list(get_quiz_options(normalized_step))
+    result = await ai_service.call_openai(
+        [
+            {"role": "system", "content": QUALIFICATION_GPT_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"Question: {get_quiz_question(normalized_step)}\n"
+                    f"Allowed options: {json.dumps(options, ensure_ascii=False)}\n"
+                    f"User answer: {text}"
+                ),
+            },
+        ],
+        model=(os.getenv("QUALIFICATION_GPT_MODEL") or os.getenv("OPENAI_FALLBACK_MODEL") or "gpt-4o-mini"),
+    )
+    if not result.get("ok"):
+        return None
+    ai_answer = str(result.get("text") or "").strip().strip('"').strip("'")
+    if is_skip_answer(ai_answer):
+        return "Skip"
+    for option in options:
+        if option.lower() == ai_answer.lower():
+            return option
+    return None
+
+
+async def save_quiz_answer(user_id: int, step: str, answer: str, skip_flow: bool = False) -> Optional[str]:
+    normalized_step = normalize_quiz_step(step)
+    normalized_answer = normalize_quiz_answer(normalized_step, answer)
+    next_step = None if skip_flow else get_next_quiz_step(normalized_step)
+    field_map = {
+        "experience": "quiz_experience",
+        "broker_experience": "quiz_broker_experience",
+        "capital": "quiz_capital",
+    }
+    field_name = field_map[normalized_step]
+
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            if next_step:
+                await cur.execute(
+                    f"""
+                    UPDATE user_onboarding
+                    SET {field_name} = %s,
+                        current_step = %s
+                    WHERE user_id = %s
+                    """,
+                    (normalized_answer, next_step, user_id),
+                )
+            else:
+                await cur.execute(
+                    f"""
+                    UPDATE user_onboarding
+                    SET {field_name} = %s,
+                        current_step = %s,
+                        quiz_completed_at = COALESCE(quiz_completed_at, NOW())
+                    WHERE user_id = %s
+                    """,
+                    (normalized_answer, "skipped" if skip_flow else "completed", user_id),
+                )
+
+    asyncio.create_task(send_aio_field_value(user_id, get_aio_question_field(normalized_step), normalized_answer))
+    return next_step
+
+
+async def finish_quiz_and_show_channel(message: types.Message, user_id: int, skipped: bool = False):
+    if skipped:
+        await message.answer("No problem.")
+        await send_channel_gate(message.chat.id)
+        return
+
+    asyncio.create_task(send_aio_postback_event(user_id, QUIZ_COMPLETE_EVENT))
+    await message.answer(
+        "Thank you, I've saved your answers.\n\n"
+        "Later, if you want help with a more suitable broker setup for your capital and experience, "
+        "you can message the manager.\n\n"
+        "Trading involves risk. The app helps you with structure and analysis, but the final decision is always yours."
+    )
+    await send_channel_gate(message.chat.id)
 
 
 async def route_user_after_start(message: types.Message, user_id: int, user_name: str):
@@ -4339,7 +4506,10 @@ async def route_user_after_start(message: types.Message, user_id: int, user_name
 
     row = await ensure_onboarding_row(user_id)
     if not row.get("quiz_completed_at"):
-        await send_quiz_question(message.chat.id, row.get("current_step") or "name")
+        current_step = normalize_quiz_step(row.get("current_step"))
+        if current_step == "experience" and not row.get("quiz_experience"):
+            await send_quiz_welcome(message.chat.id)
+        await send_quiz_question(message.chat.id, current_step)
         return
 
     if row.get("channel_gate_completed_at"):
@@ -4398,53 +4568,64 @@ async def handle_onboarding_answer(message: types.Message):
     if not row or row.get("quiz_completed_at"):
         return
 
-    current_step = row.get("current_step") or "name"
-    try:
-        answer = normalize_quiz_answer(current_step, message.text)
-    except ValueError:
-        await message.answer("Пожалуйста, отправьте корректный ответ.")
+    current_step = normalize_quiz_step(row.get("current_step"))
+    text = message.text or ""
+    if "financial advice" in text.lower():
+        await message.answer(
+            "No. We provide educational content and analytical tools. You make your own trading decisions."
+        )
         await send_quiz_question(message.chat.id, current_step)
         return
 
-    next_step = get_next_quiz_step(current_step)
-    field_map = {
-        "name": "quiz_name",
-        "age": "quiz_age",
-        "experience": "quiz_experience",
-    }
-    field_name = field_map[current_step]
+    answer = await map_quiz_answer_with_ai(current_step, text)
+    if not answer:
+        await message.answer("Please choose one of the options below, or tap Skip.")
+        await send_quiz_question(message.chat.id, current_step)
+        return
 
-    async with db_pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            if next_step:
-                await cur.execute(
-                    f"""
-                    UPDATE user_onboarding
-                    SET {field_name} = %s,
-                        current_step = %s
-                    WHERE user_id = %s
-                    """,
-                    (answer, next_step, user_id),
-                )
-            else:
-                await cur.execute(
-                    f"""
-                    UPDATE user_onboarding
-                    SET {field_name} = %s,
-                        current_step = 'completed',
-                        quiz_completed_at = COALESCE(quiz_completed_at, NOW())
-                    WHERE user_id = %s
-                    """,
-                    (answer, user_id),
-                )
-
+    skip_flow = is_skip_answer(answer)
+    next_step = await save_quiz_answer(user_id, current_step, answer, skip_flow=skip_flow)
     if next_step:
         await send_quiz_question(message.chat.id, next_step)
         return
 
-    asyncio.create_task(send_aio_postback_event(user_id, QUIZ_COMPLETE_EVENT))
-    await message.answer("Спасибо! Остался последний шаг.")
-    await send_channel_gate(message.chat.id)
+    await finish_quiz_and_show_channel(message, user_id, skipped=skip_flow)
+
+
+@dp.callback_query(lambda callback: str(callback.data or "").startswith(f"{QUIZ_ANSWER_CALLBACK_PREFIX}:"))
+async def handle_quiz_answer_callback(callback: types.CallbackQuery):
+    if not callback.message or not callback.from_user:
+        return
+    parts = str(callback.data or "").split(":")
+    if len(parts) != 3:
+        await callback.answer("Please try again.", show_alert=True)
+        return
+
+    _, raw_step, raw_index = parts
+    current_step = normalize_quiz_step(raw_step)
+    try:
+        option = get_quiz_options(current_step)[int(raw_index)]
+    except (ValueError, IndexError):
+        await callback.answer("Please try again.", show_alert=True)
+        return
+
+    user_id = int(callback.from_user.id)
+    row = await get_onboarding_row(user_id)
+    if not row or row.get("quiz_completed_at"):
+        await callback.answer()
+        return
+    if normalize_quiz_step(row.get("current_step")) != current_step:
+        await callback.answer("This question has already changed.", show_alert=True)
+        return
+
+    skip_flow = is_skip_answer(option)
+    next_step = await save_quiz_answer(user_id, current_step, option, skip_flow=skip_flow)
+    await callback.answer()
+    if next_step:
+        await send_quiz_question(callback.message.chat.id, next_step)
+        return
+
+    await finish_quiz_and_show_channel(callback.message, user_id, skipped=skip_flow)
 
 
 @dp.callback_query(lambda callback: callback.data == FUNNEL_CONTINUE_CALLBACK)
@@ -4478,13 +4659,13 @@ async def handle_funnel_check_channel(callback: types.CallbackQuery):
     except Exception as e:
         print(f"[Funnel] Channel subscription check failed: {e}")
         await callback.answer(
-            "Не получилось проверить подписку. Попробуйте еще раз через минуту.",
+            "We couldn't check your subscription. Please try again in a minute.",
             show_alert=True,
         )
         return
 
     if not is_subscribed:
-        await callback.answer("Подписка пока не найдена.", show_alert=True)
+        await callback.answer("Subscription was not found yet.", show_alert=True)
         return
 
     if db_pool:
@@ -4502,7 +4683,7 @@ async def handle_funnel_check_channel(callback: types.CallbackQuery):
 
     asyncio.create_task(send_aio_postback_event(user_id, CHANNEL_SUBSCRIBE_EVENT))
     user_name = callback.from_user.first_name or callback.from_user.username or "Trader"
-    await callback.answer("Подписка подтверждена.")
+    await callback.answer("Subscription confirmed.")
     await send_main_menu(callback.message.chat.id, user_id, user_name)
 
 class AIChatRequest(BaseModel):
