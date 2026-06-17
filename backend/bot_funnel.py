@@ -19,7 +19,11 @@ QUIZ_AIO_FIELDS = {
 QUIZ_QUESTIONS = {
     "experience": "What is your trading experience?",
     "broker_experience": "Have you worked with any of these brokers before?",
-    "capital": "What is your trading capital (deposit)?\nThis helps us suggest a more relevant broker setup later.",
+    "capital": (
+        "What is your trading capital (deposit)?\n"
+        "This helps us suggest a more relevant broker setup later.\n"
+        "Trading involves risk."
+    ),
 }
 QUIZ_OPTIONS = {
     "experience": (
@@ -66,6 +70,10 @@ SKIP_PHRASES = {
 def normalize_quiz_step(step: Optional[str]) -> str:
     normalized_step = str(step or "").strip().lower()
     return normalized_step if normalized_step in QUIZ_STEPS else QUIZ_STEPS[0]
+
+
+def is_valid_quiz_step(step: Optional[str]) -> bool:
+    return str(step or "").strip().lower() in QUIZ_STEPS
 
 
 def get_quiz_question(step: Optional[str]) -> str:

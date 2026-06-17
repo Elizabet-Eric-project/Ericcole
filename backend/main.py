@@ -69,6 +69,7 @@ try:
         get_quiz_options,
         get_quiz_question,
         is_skip_answer,
+        is_valid_quiz_step,
         is_active_channel_member,
         map_quiz_answer_locally,
         normalize_channel_settings,
@@ -84,6 +85,7 @@ except ModuleNotFoundError:
         get_quiz_options,
         get_quiz_question,
         is_skip_answer,
+        is_valid_quiz_step,
         is_active_channel_member,
         map_quiz_answer_locally,
         normalize_channel_settings,
@@ -4360,6 +4362,16 @@ async def ensure_onboarding_row(user_id: int) -> Dict[str, Any]:
                 """,
                 (user_id,),
             )
+            await cur.execute(
+                """
+                UPDATE user_onboarding
+                SET current_step = 'experience'
+                WHERE user_id = %s
+                  AND quiz_completed_at IS NULL
+                  AND current_step NOT IN ('experience', 'broker_experience', 'capital')
+                """,
+                (user_id,),
+            )
     return await get_onboarding_row(user_id) or {}
 
 
@@ -4444,7 +4456,7 @@ async def map_quiz_answer_with_ai(step: str, text: str) -> Optional[str]:
     return None
 
 
-async def save_quiz_answer(user_id: int, step: str, answer: str, skip_flow: bool = False) -> Optional[str]:
+async def save_quiz_answer(user_id: int, step: str, answer: str, skip_flow: bool = False) -> tuple[Optional[str], bool]:
     normalized_step = normalize_quiz_step(step)
     normalized_answer = normalize_quiz_answer(normalized_step, answer)
     next_step = None if skip_flow else get_next_quiz_step(normalized_step)
@@ -4464,8 +4476,10 @@ async def save_quiz_answer(user_id: int, step: str, answer: str, skip_flow: bool
                     SET {field_name} = %s,
                         current_step = %s
                     WHERE user_id = %s
+                      AND current_step = %s
+                      AND quiz_completed_at IS NULL
                     """,
-                    (normalized_answer, next_step, user_id),
+                    (normalized_answer, next_step, user_id, normalized_step),
                 )
             else:
                 await cur.execute(
@@ -4475,12 +4489,17 @@ async def save_quiz_answer(user_id: int, step: str, answer: str, skip_flow: bool
                         current_step = %s,
                         quiz_completed_at = COALESCE(quiz_completed_at, NOW())
                     WHERE user_id = %s
+                      AND current_step = %s
+                      AND quiz_completed_at IS NULL
                     """,
-                    (normalized_answer, "skipped" if skip_flow else "completed", user_id),
+                    (normalized_answer, "skipped" if skip_flow else "completed", user_id, normalized_step),
                 )
+            saved = cur.rowcount > 0
 
+    if not saved:
+        return None, False
     asyncio.create_task(send_aio_field_value(user_id, get_aio_question_field(normalized_step), normalized_answer))
-    return next_step
+    return next_step, True
 
 
 async def finish_quiz_and_show_channel(message: types.Message, user_id: int, skipped: bool = False):
@@ -4584,7 +4603,13 @@ async def handle_onboarding_answer(message: types.Message):
         return
 
     skip_flow = is_skip_answer(answer)
-    next_step = await save_quiz_answer(user_id, current_step, answer, skip_flow=skip_flow)
+    next_step, saved = await save_quiz_answer(user_id, current_step, answer, skip_flow=skip_flow)
+    if not saved:
+        await message.answer("This question has already changed. Please use the latest options.")
+        latest_row = await get_onboarding_row(user_id)
+        if latest_row and not latest_row.get("quiz_completed_at"):
+            await send_quiz_question(message.chat.id, latest_row.get("current_step") or "experience")
+        return
     if next_step:
         await send_quiz_question(message.chat.id, next_step)
         return
@@ -4602,6 +4627,9 @@ async def handle_quiz_answer_callback(callback: types.CallbackQuery):
         return
 
     _, raw_step, raw_index = parts
+    if not is_valid_quiz_step(raw_step):
+        await callback.answer("Please try again.", show_alert=True)
+        return
     current_step = normalize_quiz_step(raw_step)
     try:
         option = get_quiz_options(current_step)[int(raw_index)]
@@ -4619,7 +4647,10 @@ async def handle_quiz_answer_callback(callback: types.CallbackQuery):
         return
 
     skip_flow = is_skip_answer(option)
-    next_step = await save_quiz_answer(user_id, current_step, option, skip_flow=skip_flow)
+    next_step, saved = await save_quiz_answer(user_id, current_step, option, skip_flow=skip_flow)
+    if not saved:
+        await callback.answer("This question has already changed.", show_alert=True)
+        return
     await callback.answer()
     if next_step:
         await send_quiz_question(callback.message.chat.id, next_step)

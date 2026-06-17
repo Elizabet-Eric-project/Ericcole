@@ -9,6 +9,7 @@ from bot_funnel import (
     get_quiz_options,
     get_quiz_question,
     is_skip_answer,
+    is_valid_quiz_step,
     is_active_channel_member,
     map_quiz_answer_locally,
     normalize_channel_settings,
@@ -22,7 +23,9 @@ class BotFunnelTest(unittest.TestCase):
         self.assertEqual(get_quiz_question("broker_experience"), "Have you worked with any of these brokers before?")
         self.assertEqual(
             get_quiz_question("capital"),
-            "What is your trading capital (deposit)?\nThis helps us suggest a more relevant broker setup later.",
+            "What is your trading capital (deposit)?\n"
+            "This helps us suggest a more relevant broker setup later.\n"
+            "Trading involves risk.",
         )
 
     def test_normalizes_quiz_answers(self):
@@ -51,6 +54,11 @@ class BotFunnelTest(unittest.TestCase):
         self.assertEqual(get_aio_question_field("experience"), "tg_question1")
         self.assertEqual(get_aio_question_field("broker_experience"), "tg_question2")
         self.assertEqual(get_aio_question_field("capital"), "tg_question3")
+
+    def test_detects_valid_quiz_steps(self):
+        self.assertTrue(is_valid_quiz_step("experience"))
+        self.assertTrue(is_valid_quiz_step("capital"))
+        self.assertFalse(is_valid_quiz_step("bad_step"))
 
     def test_normalizes_channel_settings_with_defaults(self):
         settings = normalize_channel_settings({})
