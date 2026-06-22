@@ -168,6 +168,47 @@ button:active {
   text-align: center;
 }
 
+.signal-gate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(30, 22, 12, 0.32);
+  backdrop-filter: blur(5px);
+}
+
+.signal-gate-modal {
+  width: min(360px, 100%);
+  background: var(--bg-panel);
+  border: 1px solid rgba(212, 175, 55, 0.38);
+  border-radius: var(--radius);
+  box-shadow: 0 14px 40px rgba(61, 47, 28, 0.18);
+  padding: 20px;
+  color: var(--text-main);
+  text-align: left;
+}
+
+.signal-gate-modal h3 {
+  margin: 0 0 10px;
+  color: var(--accent-strong);
+  font-size: 1.05rem;
+}
+
+.signal-gate-modal p {
+  margin: 0 0 10px;
+  color: var(--text-main);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.signal-gate-note {
+  color: var(--text-soft) !important;
+  font-size: 0.82rem !important;
+}
+
 ::-webkit-scrollbar {
   width: 7px;
   height: 7px;

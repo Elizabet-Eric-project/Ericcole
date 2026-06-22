@@ -87,6 +87,11 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     balance_sync_enabled TINYINT(1) NOT NULL DEFAULT 0,
                     balance_synced_at TIMESTAMP NULL DEFAULT NULL,
                     balance_sync_error TEXT NULL,
+                    pocket_registered TINYINT(1) NOT NULL DEFAULT 0,
+                    pocket_deposited TINYINT(1) NOT NULL DEFAULT 0,
+                    pocket_registered_at VARCHAR(64) NULL,
+                    pocket_deposit_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+                    pocket_checked_at TIMESTAMP NULL DEFAULT NULL,
                     lang VARCHAR(16) NOT NULL DEFAULT 'ru',
                     mode VARCHAR(16) NOT NULL DEFAULT 'forex',
                     strategy_id BIGINT NULL,
@@ -366,6 +371,11 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
         await _ensure_column(conn, db_name, "users", "balance_sync_enabled", "ALTER TABLE users ADD COLUMN balance_sync_enabled TINYINT(1) NOT NULL DEFAULT 0")
         await _ensure_column(conn, db_name, "users", "balance_synced_at", "ALTER TABLE users ADD COLUMN balance_synced_at TIMESTAMP NULL DEFAULT NULL")
         await _ensure_column(conn, db_name, "users", "balance_sync_error", "ALTER TABLE users ADD COLUMN balance_sync_error TEXT NULL")
+        await _ensure_column(conn, db_name, "users", "pocket_registered", "ALTER TABLE users ADD COLUMN pocket_registered TINYINT(1) NOT NULL DEFAULT 0")
+        await _ensure_column(conn, db_name, "users", "pocket_deposited", "ALTER TABLE users ADD COLUMN pocket_deposited TINYINT(1) NOT NULL DEFAULT 0")
+        await _ensure_column(conn, db_name, "users", "pocket_registered_at", "ALTER TABLE users ADD COLUMN pocket_registered_at VARCHAR(64) NULL")
+        await _ensure_column(conn, db_name, "users", "pocket_deposit_amount", "ALTER TABLE users ADD COLUMN pocket_deposit_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00")
+        await _ensure_column(conn, db_name, "users", "pocket_checked_at", "ALTER TABLE users ADD COLUMN pocket_checked_at TIMESTAMP NULL DEFAULT NULL")
         await _ensure_column(conn, db_name, "users", "strategy_id", "ALTER TABLE users ADD COLUMN strategy_id BIGINT NULL")
         await _ensure_column(conn, db_name, "users", "lang", "ALTER TABLE users ADD COLUMN lang VARCHAR(16) NOT NULL DEFAULT 'ru'")
         await _ensure_column(conn, db_name, "users", "mode", "ALTER TABLE users ADD COLUMN mode VARCHAR(16) NOT NULL DEFAULT 'forex'")
@@ -607,6 +617,7 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
         await _ensure_index(conn, db_name, "users", "idx_users_strategy_id", "CREATE INDEX idx_users_strategy_id ON users(strategy_id)")
         await _ensure_index(conn, db_name, "users", "idx_users_aio_visit_uuid", "CREATE INDEX idx_users_aio_visit_uuid ON users(aio_visit_uuid)")
         await _ensure_index(conn, db_name, "users", "idx_users_balance_sync", "CREATE INDEX idx_users_balance_sync ON users(balance_sync_enabled, balance_synced_at)")
+        await _ensure_index(conn, db_name, "users", "idx_users_signal_gate", "CREATE INDEX idx_users_signal_gate ON users(pocket_registered, pocket_deposited)")
         await _ensure_index(conn, db_name, "admin_users", "idx_admin_users_active", "CREATE INDEX idx_admin_users_active ON admin_users(is_active)")
         await _ensure_index(
             conn,

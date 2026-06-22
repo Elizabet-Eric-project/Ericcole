@@ -136,7 +136,8 @@ export default function DemoAnalysisSettings({
           exp: forexParams.exp,
           strategy_id: selectedStrategy.id || 1,
           allowed_indicators: stratKeys,
-          exchange: assetObj?.exchange || null
+          exchange: assetObj?.exchange || null,
+          demo: true
         })
       });
       
