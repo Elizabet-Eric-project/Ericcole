@@ -198,6 +198,8 @@ export default function UsersPage() {
             <div><span>ID:</span> {selectedUser.user_id}</div>
             <div><span>Trader ID:</span> {selectedUser.trader_id || 'Не указан'}</div>
             <div><span>Баланс:</span> {formatBalance(selectedUser.balance)}</div>
+            <div><span>Регистрация Pocket:</span> {Number(selectedUser.pocket_registered) === 1 ? 'Есть' : 'Нету'}</div>
+            <div><span>Депозит Pocket:</span> {Number(selectedUser.pocket_deposited) === 1 ? 'Есть' : 'Нету'}</div>
             <div><span>Доступ Forex:</span> {hasAccess(selectedUser.forex_access) ? 'Есть' : 'Нету'}</div>
             <div><span>Доступ Binary:</span> {hasAccess(selectedUser.binary_access) ? 'Есть' : 'Нету'}</div>
             <div><span>Username:</span> {selectedUser.username || '-'}</div>
@@ -207,6 +209,7 @@ export default function UsersPage() {
             <div><span>Язык:</span> {selectedUser.lang || '-'}</div>
             <div><span>Админ:</span> {Number(selectedUser.is_admin) === 1 ? 'Да' : 'Нет'}</div>
             <div><span>Синхронизация баланса:</span> {Number(selectedUser.balance_sync_enabled) === 1 ? 'Включена' : 'Выключена'}</div>
+            <div><span>Последняя проверка Pocket:</span> {selectedUser.pocket_checked_at || '-'}</div>
             <div><span>Блокировка:</span> {isBlocked ? `Да${selectedUser.blocked_at ? `, ${selectedUser.blocked_at}` : ''}` : 'Нет'}</div>
             <div><span>Создан:</span> {selectedUser.created_at || '-'}</div>
           </div>
@@ -369,7 +372,7 @@ export default function UsersPage() {
                 </span>
               </div>
               <div className="admin-entity-meta">
-                ID: {user.user_id} | Trader: {user.trader_id || '-'} | {formatBalance(user.balance)} | Forex {hasAccess(user.forex_access) ? 'есть' : 'нет'} | Binary {hasAccess(user.binary_access) ? 'есть' : 'нет'} | {blocked ? 'blocked' : (user.mode || '-')}
+                ID: {user.user_id} | Trader: {user.trader_id || '-'} | {formatBalance(user.balance)} | Reg {Number(user.pocket_registered) === 1 ? 'есть' : 'нет'} | Dep {Number(user.pocket_deposited) === 1 ? 'есть' : 'нет'} | Forex {hasAccess(user.forex_access) ? 'есть' : 'нет'} | Binary {hasAccess(user.binary_access) ? 'есть' : 'нет'} | {blocked ? 'blocked' : (user.mode || '-')}
               </div>
             </button>
           );

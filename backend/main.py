@@ -1212,6 +1212,41 @@ def truthy_db(value) -> int:
         return 0
 
 
+SIGNAL_ACCESS_REQUIRED_DETAIL = "registration_and_deposit_required"
+
+
+def numeric_payload_value(payload: Any, *keys: str) -> float:
+    if not isinstance(payload, dict):
+        return 0.0
+    for key in keys:
+        value = payload.get(key)
+        if value is None:
+            continue
+        try:
+            amount = float(value)
+        except (TypeError, ValueError):
+            continue
+        if amount > 0:
+            return round(amount, 2)
+    return 0.0
+
+
+def extract_pocket_registration_status(payload: Any) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {"registered": 0, "registered_at": None}
+    registered_at = payload.get("registered_at") or payload.get("registration_date") or payload.get("created_at")
+    registered = 1 if (payload.get("user_id") or registered_at or payload.get("status")) else 0
+    return {
+        "registered": registered,
+        "registered_at": str(registered_at).strip()[:64] if registered_at else None,
+    }
+
+
+def extract_pocket_deposit_status(payload: Any) -> Dict[str, Any]:
+    amount = numeric_payload_value(payload, "ftd_amount", "total_deposits", "deposit_amount", "deposits")
+    return {"deposited": 1 if amount > 0 else 0, "deposit_amount": amount}
+
+
 def extract_pocket_balance(payload: Any) -> Optional[float]:
     if not isinstance(payload, dict):
         return None
@@ -1244,6 +1279,8 @@ async def sync_pocket_balance_for_user(user_row: Dict[str, Any], pocket_settings
     try:
         payload = await fetch_pocket_user_info(trader_id, partner_id, api_token)
         balance = extract_pocket_balance(payload)
+        registration_status = extract_pocket_registration_status(payload)
+        deposit_status = extract_pocket_deposit_status(payload)
         if balance is None:
             raise ValueError("Pocket response does not contain balance")
         async with db_pool.acquire() as conn:
@@ -1253,10 +1290,22 @@ async def sync_pocket_balance_for_user(user_row: Dict[str, Any], pocket_settings
                     UPDATE users
                     SET balance = %s,
                         balance_synced_at = NOW(),
-                        balance_sync_error = NULL
+                        balance_sync_error = NULL,
+                        pocket_registered = %s,
+                        pocket_deposited = %s,
+                        pocket_registered_at = %s,
+                        pocket_deposit_amount = %s,
+                        pocket_checked_at = NOW()
                     WHERE user_id = %s
                     """,
-                    (balance, user_id),
+                    (
+                        balance,
+                        registration_status["registered"],
+                        deposit_status["deposited"],
+                        registration_status["registered_at"],
+                        deposit_status["deposit_amount"],
+                        user_id,
+                    ),
                 )
         return True
     except Exception as e:
@@ -1266,7 +1315,8 @@ async def sync_pocket_balance_for_user(user_row: Dict[str, Any], pocket_settings
                     """
                     UPDATE users
                     SET balance_synced_at = NOW(),
-                        balance_sync_error = %s
+                        balance_sync_error = %s,
+                        pocket_checked_at = NOW()
                     WHERE user_id = %s
                     """,
                     (str(e)[:1000], user_id),
@@ -1303,6 +1353,70 @@ async def pocket_balance_sync_worker():
             print(f"[PocketSync] Worker error: {e}")
 
 
+async def get_signal_access_status(user_id: int) -> Dict[str, Any]:
+    if not user_id or not db_pool:
+        return {"has_trader_id": 0, "registered": 0, "deposited": 0}
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT trader_id,
+                       COALESCE(pocket_registered, 0) AS registered,
+                       COALESCE(pocket_deposited, 0) AS deposited
+                FROM users
+                WHERE user_id = %s
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            row = await cur.fetchone()
+    return {
+        "has_trader_id": 1 if str((row or {}).get("trader_id") or "").strip() else 0,
+        "registered": truthy_db((row or {}).get("registered")),
+        "deposited": truthy_db((row or {}).get("deposited")),
+    }
+
+
+async def refresh_signal_access_from_pocket(user_id: int) -> bool:
+    if not user_id or not db_pool:
+        return False
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT user_id, trader_id, pocket_checked_at
+                FROM users
+                WHERE user_id = %s
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            user_row = await cur.fetchone()
+    if not user_row or not str(user_row.get("trader_id") or "").strip():
+        return False
+    checked_at = user_row.get("pocket_checked_at")
+    if isinstance(checked_at, datetime) and (datetime.utcnow() - checked_at).total_seconds() < 300:
+        return False
+    pocket_settings = await get_pocket_api_settings_row(include_token=True)
+    if not pocket_settings.get("partner_id") or not pocket_settings.get("api_token"):
+        return False
+    return await sync_pocket_balance_for_user(user_row, pocket_settings)
+
+
+async def ensure_signal_access(user_id: int, allow_demo: bool = False) -> None:
+    if allow_demo:
+        return
+    status = await get_signal_access_status(user_id)
+    if status["has_trader_id"] != 1:
+        raise HTTPException(status_code=403, detail=SIGNAL_ACCESS_REQUIRED_DETAIL)
+    if status["registered"] != 1 or status["deposited"] != 1:
+        refreshed = await refresh_signal_access_from_pocket(user_id)
+        if refreshed:
+            status = await get_signal_access_status(user_id)
+    if status["has_trader_id"] != 1 or status["registered"] != 1 or status["deposited"] != 1:
+        raise HTTPException(status_code=403, detail=SIGNAL_ACCESS_REQUIRED_DETAIL)
+
+
 def normalize_access_payload(value) -> int:
     return 1 if bool(value) else 0
 
@@ -1314,6 +1428,10 @@ async def fetch_admin_user_row(cur, user_id: int) -> Optional[Dict[str, Any]]:
                u.trader_id, COALESCE(u.balance, 0) AS balance,
                COALESCE(u.balance_sync_enabled, 0) AS balance_sync_enabled,
                u.balance_synced_at, u.balance_sync_error,
+               COALESCE(u.pocket_registered, 0) AS pocket_registered,
+               COALESCE(u.pocket_deposited, 0) AS pocket_deposited,
+               u.pocket_registered_at, COALESCE(u.pocket_deposit_amount, 0) AS pocket_deposit_amount,
+               u.pocket_checked_at,
                COALESCE(fx.is_enabled, 1) AS forex_access,
                COALESCE(bin.is_enabled, 1) AS binary_access,
                COALESCE(u.is_blocked, 0) AS is_blocked, u.blocked_at, u.blocked_by, u.created_at,
@@ -1519,6 +1637,10 @@ async def admin_users(limit: int = 50, offset: int = 0, search: str = "", admin=
                            u.trader_id, COALESCE(u.balance, 0) AS balance,
                            COALESCE(u.balance_sync_enabled, 0) AS balance_sync_enabled,
                            u.balance_synced_at, u.balance_sync_error,
+                           COALESCE(u.pocket_registered, 0) AS pocket_registered,
+                           COALESCE(u.pocket_deposited, 0) AS pocket_deposited,
+                           u.pocket_registered_at, COALESCE(u.pocket_deposit_amount, 0) AS pocket_deposit_amount,
+                           u.pocket_checked_at,
                            COALESCE(fx.is_enabled, 1) AS forex_access,
                            COALESCE(bin.is_enabled, 1) AS binary_access,
                            COALESCE(u.is_blocked, 0) AS is_blocked, u.blocked_at, u.blocked_by, u.created_at,
@@ -1543,6 +1665,8 @@ async def admin_users(limit: int = 50, offset: int = 0, search: str = "", admin=
                     SELECT u.user_id, u.username, u.first_name, u.mode, u.lang, u.strategy_id,
                            NULL AS trader_id, 0 AS balance,
                            0 AS balance_sync_enabled, NULL AS balance_synced_at, NULL AS balance_sync_error,
+                           0 AS pocket_registered, 0 AS pocket_deposited, NULL AS pocket_registered_at,
+                           0 AS pocket_deposit_amount, NULL AS pocket_checked_at,
                            1 AS forex_access, 1 AS binary_access,
                            0 AS is_blocked, NULL AS blocked_at, NULL AS blocked_by, NULL AS created_at,
                            p.name AS strategy_name,
@@ -3260,6 +3384,10 @@ async def get_profile(user=Depends(get_telegram_user)):
                        u.strategy_id, u.trader_id, COALESCE(u.balance, 0) AS balance,
                        COALESCE(u.balance_sync_enabled, 0) AS balance_sync_enabled,
                        u.balance_synced_at,
+                       COALESCE(u.pocket_registered, 0) AS pocket_registered,
+                       COALESCE(u.pocket_deposited, 0) AS pocket_deposited,
+                       u.pocket_registered_at, COALESCE(u.pocket_deposit_amount, 0) AS pocket_deposit_amount,
+                       u.pocket_checked_at,
                        COALESCE(fx.is_enabled, 1) AS forex_access,
                        COALESCE(bin.is_enabled, 1) AS binary_access,
                        COALESCE(u.is_blocked, 0) AS is_blocked, u.blocked_at,
@@ -3838,6 +3966,7 @@ async def get_news(user=Depends(get_telegram_user)):
 async def create_binary_analysis(request: Request, user=Depends(get_telegram_user)):
     data = await request.json()
     user_id = int(user["user_id"])
+    await ensure_signal_access(user_id, allow_demo=bool(data.get("demo")))
     pair = str(data.get("pair") or "").strip()
     interval_raw = str(data.get("exp") or "1m").strip().lower()
     market_kind = normalize_market_kind(data.get("market") or data.get("market_kind") or "forex")
@@ -4107,6 +4236,7 @@ async def settle_analysis_now(request: Request, user=Depends(get_telegram_user))
 async def create_forex_analysis(request: Request, user=Depends(get_telegram_user)):
     data = await request.json()
     user_id = int(user["user_id"])
+    await ensure_signal_access(user_id, allow_demo=bool(data.get("demo")))
     pair = data.get("pair")
     interval_raw = data.get("exp")
     strategy_id = data.get("strategy_id")

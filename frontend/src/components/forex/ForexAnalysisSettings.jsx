@@ -46,6 +46,7 @@ export default function ForexAnalysisSettings({
   const [timeStats, setTimeStats] = useState({ passed: 0, remaining: 0, expired: false });
   const [news, setNews] = useState(null);
   const [isNewsModalOpen, setIsNewsModalOpen] = useState(false);
+  const [signalGateOpen, setSignalGateOpen] = useState(false);
   
   const [assetType, setAssetType] = useState('Currencies');
   const expOptions = ['5m', '15m', '30m', '1h', '4h', '1d'];
@@ -273,7 +274,8 @@ export default function ForexAnalysisSettings({
     setAnalysisData(null);
     setIsProcessing(true);
     setEditMode(null);
-    const uiDelay = Math.floor(Math.random() * 7000) + 3000; 
+    setSignalGateOpen(false);
+    const uiDelay = Math.floor(Math.random() * 7000) + 3000;
     const startTime = Date.now();
     const assetObj = getAssetObject(forexParams.pair);
     const stratKeys = selectedStrategy.indicator_keys 
@@ -308,7 +310,11 @@ export default function ForexAnalysisSettings({
       }
     } catch (error) {
       console.error(error);
-      alert(t.noDataError);
+      if (error.message === 'registration_and_deposit_required') {
+        setSignalGateOpen(true);
+      } else {
+        alert(t.noDataError);
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -608,6 +614,18 @@ export default function ForexAnalysisSettings({
           <button className="conduct-analysis-btn" onClick={handleConductAnalysis}>{t.conductAnalysisBtn}</button>
         </div>
       )}
+      {signalGateOpen ? (
+        <div className="signal-gate-overlay" onClick={() => setSignalGateOpen(false)}>
+          <div className="signal-gate-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Signal access</h3>
+            <p>Signals are available after broker registration and deposit are confirmed.</p>
+            <p className="signal-gate-note">Once this is completed, request a signal again.</p>
+            <button className="conduct-analysis-btn" type="button" onClick={() => setSignalGateOpen(false)}>
+              OK
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

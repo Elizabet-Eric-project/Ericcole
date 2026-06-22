@@ -86,6 +86,7 @@ export default function BinarySignalSettings({
   const [loadingPhraseIndex, setLoadingPhraseIndex] = useState(0);
   const [analysisData, setAnalysisData] = useState(null);
   const [timeStats, setTimeStats] = useState({ remaining: 0, expired: false });
+  const [signalGateOpen, setSignalGateOpen] = useState(false);
   const settleStartedRef = useRef(false);
   const expirationDeadlineRef = useRef(null);
 
@@ -242,6 +243,7 @@ export default function BinarySignalSettings({
     setAnalysisData(null);
     setEditMode(null);
     setLoadError('');
+    setSignalGateOpen(false);
     settleStartedRef.current = false;
     const stratKeys = selectedStrategy?.indicator_keys
       ? selectedStrategy.indicator_keys.split(',').map(item => item.trim().toUpperCase()).filter(Boolean)
@@ -277,7 +279,12 @@ export default function BinarySignalSettings({
         throw new Error(result?.error || t.noDataError || 'Signal is unavailable');
       }
     } catch (error) {
-      setLoadError(error.message || t.noDataError || 'Signal is unavailable');
+      if (error.message === 'registration_and_deposit_required') {
+        setSignalGateOpen(true);
+        setLoadError('');
+      } else {
+        setLoadError(error.message || t.noDataError || 'Signal is unavailable');
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -575,6 +582,19 @@ export default function BinarySignalSettings({
           </button>
         </div>
       )}
+
+      {signalGateOpen ? (
+        <div className="signal-gate-overlay" onClick={() => setSignalGateOpen(false)}>
+          <div className="signal-gate-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Signal access</h3>
+            <p>Signals are available after broker registration and deposit are confirmed.</p>
+            <p className="signal-gate-note">Once this is completed, request a signal again.</p>
+            <button className="conduct-analysis-btn" type="button" onClick={() => setSignalGateOpen(false)}>
+              OK
+            </button>
+          </div>
+        </div>
+      ) : null}
 
 
       <div className="actions-wrapper" style={{ marginTop: '30px' }}>
