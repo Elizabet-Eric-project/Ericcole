@@ -279,7 +279,7 @@ export default function BinarySignalSettings({
         throw new Error(result?.error || t.noDataError || 'Signal is unavailable');
       }
     } catch (error) {
-      if (error.message === 'registration_and_deposit_required') {
+      if (error.message === 'signal_access_required' || error.message === 'registration_and_deposit_required') {
         setSignalGateOpen(true);
         setLoadError('');
       } else {
@@ -587,8 +587,8 @@ export default function BinarySignalSettings({
         <div className="signal-gate-overlay" onClick={() => setSignalGateOpen(false)}>
           <div className="signal-gate-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Signal access</h3>
-            <p>Signals are available after broker registration and deposit are confirmed.</p>
-            <p className="signal-gate-note">Once this is completed, request a signal again.</p>
+            <p>Signal access has not been issued for your account yet.</p>
+            <p className="signal-gate-note">Once access is enabled, request a signal again.</p>
             <button className="conduct-analysis-btn" type="button" onClick={() => setSignalGateOpen(false)}>
               OK
             </button>

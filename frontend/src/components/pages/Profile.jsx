@@ -38,8 +38,8 @@ export default function Profile({
 
   const currentMode = (user.mode || 'binary').toLowerCase();
   const isDemo = currentMode === 'demo';
-  const forexAvailable = Number(user.forex_access ?? 1) === 1;
-  const binaryAvailable = Number(user.binary_access ?? 1) === 1;
+  const forexAvailable = Number(user.forex_access ?? 0) === 1;
+  const binaryAvailable = Number(user.binary_access ?? 0) === 1;
   const selectedStrategy = strategies.find(s => s.id === user.strategy_id) || {};
 
   const systemStrategies = strategies.filter(s => s.is_system === 1);
