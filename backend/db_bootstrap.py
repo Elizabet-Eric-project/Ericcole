@@ -910,13 +910,13 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
             await cur.execute(
                 """
                 INSERT IGNORE INTO user_mode_access (user_id, mode, is_enabled, updated_by)
-                SELECT user_id, 'forex', 1, NULL FROM users
+                SELECT user_id, 'forex', 0, NULL FROM users
                 """
             )
             await cur.execute(
                 """
                 INSERT IGNORE INTO user_mode_access (user_id, mode, is_enabled, updated_by)
-                SELECT user_id, 'binary', 1, NULL FROM users
+                SELECT user_id, 'binary', 0, NULL FROM users
                 """
             )
 
