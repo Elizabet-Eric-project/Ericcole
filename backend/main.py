@@ -6,6 +6,7 @@ import json
 import secrets
 import random
 from datetime import datetime, timedelta
+from urllib.parse import parse_qs
 from fastapi import FastAPI, Request, Depends, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, types
@@ -63,6 +64,7 @@ except ModuleNotFoundError:
 try:
     from backend.bot_funnel import (
         CHANNEL_SUBSCRIBE_EVENT,
+        CHATTERFY_START_EVENT,
         QUIZ_COMPLETE_EVENT,
         get_next_quiz_step,
         get_aio_question_field,
@@ -79,6 +81,7 @@ try:
 except ModuleNotFoundError:
     from bot_funnel import (
         CHANNEL_SUBSCRIBE_EVENT,
+        CHATTERFY_START_EVENT,
         QUIZ_COMPLETE_EVENT,
         get_next_quiz_step,
         get_aio_question_field,
@@ -92,6 +95,10 @@ except ModuleNotFoundError:
         normalize_quiz_step,
         normalize_quiz_answer,
     )
+try:
+    from backend.chatterfy_tracking import normalize_chatterfy_payload
+except ModuleNotFoundError:
+    from chatterfy_tracking import normalize_chatterfy_payload
 
 load_dotenv()
 
@@ -142,6 +149,7 @@ DB_CONFIG = {
     "db": os.getenv("DB_NAME"),
     "autocommit": True
 }
+CHATTERFY_POSTBACK_SECRET = (os.getenv("CHATTERFY_POSTBACK_SECRET") or "").strip()
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -429,6 +437,177 @@ async def send_aio_field_value(user_id: int, field_name: str, field_value: objec
         }
     except Exception as exc:
         return {"status": "failed", "error": str(exc)[:4000]}
+
+
+async def read_postback_payload(request: Request) -> Dict[str, Any]:
+    payload: Dict[str, Any] = dict(request.query_params)
+    if request.method.upper() != "POST":
+        return payload
+
+    body = await request.body()
+    if not body:
+        return payload
+
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        try:
+            body_payload = json.loads(body.decode("utf-8"))
+            if isinstance(body_payload, dict):
+                payload.update(body_payload)
+        except Exception:
+            pass
+        return payload
+
+    try:
+        parsed = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+        payload.update({key: values[-1] if values else "" for key, values in parsed.items()})
+    except Exception:
+        pass
+    return payload
+
+
+def get_chatterfy_postback_secret() -> str:
+    return (os.getenv("CHATTERFY_POSTBACK_SECRET") or CHATTERFY_POSTBACK_SECRET or "").strip()
+
+
+async def insert_chatterfy_postback_log(
+    normalized: Dict[str, Any],
+    raw_payload: Dict[str, Any],
+    status: str,
+    reason: Optional[str],
+    aio_visit_uuid: Optional[str],
+    source_ip: str,
+) -> int:
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO chatterfy_postback_events (
+                    event_slug, unique_key, user_id, aio_visit_uuid, chatterfy_id,
+                    tg_username, tg_first_name, raw_payload, status, reason, source_ip
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    normalized.get("event_slug") or "unknown",
+                    normalized.get("unique_key") or "unknown",
+                    normalized.get("telegram_id"),
+                    aio_visit_uuid,
+                    normalized.get("chatterfy_id") or None,
+                    normalized.get("tg_username") or None,
+                    normalized.get("tg_first_name") or None,
+                    json.dumps(raw_payload, ensure_ascii=False, default=str)[:16000],
+                    status,
+                    reason,
+                    source_ip[:64],
+                ),
+            )
+            return int(cur.lastrowid)
+
+
+async def update_chatterfy_postback_log(
+    log_id: int,
+    status: str,
+    reason: Optional[str] = None,
+    aio_postback_result: Optional[Dict[str, Any]] = None,
+    aio_fields_result: Optional[Dict[str, Any]] = None,
+) -> None:
+    aio_postback_event_id = None
+    if aio_postback_result:
+        aio_postback_event_id = aio_postback_result.get("event_id")
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE chatterfy_postback_events
+                SET status = %s,
+                    reason = %s,
+                    aio_postback_event_id = %s,
+                    aio_postback_result = %s,
+                    aio_fields_result = %s
+                WHERE id = %s
+                """,
+                (
+                    status,
+                    reason,
+                    aio_postback_event_id,
+                    json.dumps(aio_postback_result or {}, ensure_ascii=False, default=str)[:16000],
+                    json.dumps(aio_fields_result or {}, ensure_ascii=False, default=str)[:16000],
+                    log_id,
+                ),
+            )
+
+
+@app.api_route("/api/integrations/chatterfy/postback", methods=["GET", "POST"])
+async def chatterfy_postback(request: Request):
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="Database is unavailable")
+
+    expected_secret = get_chatterfy_postback_secret()
+    if not expected_secret:
+        raise HTTPException(status_code=503, detail="Chatterfy postback secret is not configured")
+
+    payload = await read_postback_payload(request)
+    provided_secret = str(payload.get("secret") or request.headers.get("X-Chatterfy-Secret") or "").strip()
+    if not provided_secret or not secrets.compare_digest(provided_secret, expected_secret):
+        raise HTTPException(status_code=403, detail="Invalid postback secret")
+
+    normalized = normalize_chatterfy_payload(payload)
+    source_ip = request.client.host if request.client else ""
+    event_slug = normalized.get("event_slug")
+    telegram_id = normalized.get("telegram_id")
+
+    if event_slug != CHATTERFY_START_EVENT:
+        log_id = await insert_chatterfy_postback_log(normalized, payload, "skipped", "unsupported_event", None, source_ip)
+        return {"status": "skipped", "reason": "unsupported_event", "log_id": log_id}
+
+    if not telegram_id:
+        log_id = await insert_chatterfy_postback_log(normalized, payload, "skipped", "missing_tgid", None, source_ip)
+        return {"status": "skipped", "reason": "missing_tgid", "log_id": log_id}
+
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT user_id, aio_visit_uuid
+                FROM users
+                WHERE user_id = %s
+                LIMIT 1
+                """,
+                (telegram_id,),
+            )
+            user_row = await cur.fetchone()
+
+    aio_visit_uuid = normalize_aio_visit_uuid((user_row or {}).get("aio_visit_uuid"))
+    if not user_row:
+        log_id = await insert_chatterfy_postback_log(normalized, payload, "skipped", "user_not_found", None, source_ip)
+        return {"status": "skipped", "reason": "user_not_found", "log_id": log_id}
+    if not aio_visit_uuid:
+        log_id = await insert_chatterfy_postback_log(normalized, payload, "skipped", "missing_aio_visit_uuid", None, source_ip)
+        return {"status": "skipped", "reason": "missing_aio_visit_uuid", "log_id": log_id}
+
+    log_id = await insert_chatterfy_postback_log(normalized, payload, "received", None, aio_visit_uuid, source_ip)
+    aio_result = await send_aio_postback_event(
+        int(telegram_id),
+        CHATTERFY_START_EVENT,
+        unique_key=normalized.get("unique_key") or CHATTERFY_START_EVENT,
+    )
+    fields_result = await send_aio_user_fields(
+        int(telegram_id),
+        first_name=normalized.get("tg_first_name") or "",
+        username=normalized.get("tg_username") or "",
+    )
+
+    final_status = aio_result.get("status") or "unknown"
+    reason = aio_result.get("reason") or aio_result.get("error")
+    await update_chatterfy_postback_log(log_id, final_status, reason, aio_result, fields_result)
+    return {
+        "status": final_status,
+        "reason": reason,
+        "log_id": log_id,
+        "aio_event_id": aio_result.get("event_id"),
+        "aio_fields_status": fields_result.get("status"),
+    }
 
 
 async def get_admin_user(

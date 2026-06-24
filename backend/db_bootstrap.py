@@ -365,6 +365,30 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                 """
             )
 
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chatterfy_postback_events (
+                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    event_slug VARCHAR(64) CHARACTER SET ascii NOT NULL,
+                    unique_key VARCHAR(191) CHARACTER SET ascii NOT NULL,
+                    user_id BIGINT NULL,
+                    aio_visit_uuid VARCHAR(64) CHARACTER SET ascii NULL,
+                    chatterfy_id VARCHAR(128) NULL,
+                    tg_username VARCHAR(255) NULL,
+                    tg_first_name VARCHAR(255) NULL,
+                    raw_payload LONGTEXT NULL,
+                    status VARCHAR(32) NOT NULL DEFAULT 'received',
+                    reason VARCHAR(255) NULL,
+                    aio_postback_event_id BIGINT NULL,
+                    aio_postback_result LONGTEXT NULL,
+                    aio_fields_result LONGTEXT NULL,
+                    source_ip VARCHAR(64) NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+
         await _ensure_column(conn, db_name, "users", "trader_id", "ALTER TABLE users ADD COLUMN trader_id VARCHAR(64) NULL")
         await _ensure_column(conn, db_name, "users", "aio_visit_uuid", "ALTER TABLE users ADD COLUMN aio_visit_uuid VARCHAR(64) NULL")
         await _ensure_column(conn, db_name, "users", "balance", "ALTER TABLE users ADD COLUMN balance DECIMAL(18,2) NOT NULL DEFAULT 0.00")
@@ -652,6 +676,9 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
         await _ensure_index(conn, db_name, "user_mode_access", "idx_user_mode_access_mode", "CREATE INDEX idx_user_mode_access_mode ON user_mode_access(mode)")
         await _ensure_index(conn, db_name, "aio_postback_events", "idx_aio_postback_events_user", "CREATE INDEX idx_aio_postback_events_user ON aio_postback_events(user_id, created_at)")
         await _ensure_index(conn, db_name, "aio_postback_events", "idx_aio_postback_events_status", "CREATE INDEX idx_aio_postback_events_status ON aio_postback_events(status, created_at)")
+        await _ensure_index(conn, db_name, "chatterfy_postback_events", "idx_chatterfy_postback_events_user", "CREATE INDEX idx_chatterfy_postback_events_user ON chatterfy_postback_events(user_id, created_at)")
+        await _ensure_index(conn, db_name, "chatterfy_postback_events", "idx_chatterfy_postback_events_status", "CREATE INDEX idx_chatterfy_postback_events_status ON chatterfy_postback_events(status, created_at)")
+        await _ensure_index(conn, db_name, "chatterfy_postback_events", "idx_chatterfy_postback_events_unique", "CREATE INDEX idx_chatterfy_postback_events_unique ON chatterfy_postback_events(unique_key)")
         await _ensure_index(
             conn,
             db_name,
