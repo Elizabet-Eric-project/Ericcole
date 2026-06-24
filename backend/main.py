@@ -538,6 +538,26 @@ async def update_chatterfy_postback_log(
             )
 
 
+async def finish_chatterfy_postback_delivery(log_id: int, telegram_id: int, normalized: Dict[str, Any]) -> None:
+    try:
+        aio_result = await send_aio_postback_event(
+            int(telegram_id),
+            CHATTERFY_START_EVENT,
+            unique_key=normalized.get("unique_key") or CHATTERFY_START_EVENT,
+        )
+        fields_result = await send_aio_user_fields(
+            int(telegram_id),
+            first_name=normalized.get("tg_first_name") or "",
+            username=normalized.get("tg_username") or "",
+        )
+
+        final_status = aio_result.get("status") or "unknown"
+        reason = aio_result.get("reason") or aio_result.get("error")
+        await update_chatterfy_postback_log(log_id, final_status, reason, aio_result, fields_result)
+    except Exception as exc:
+        await update_chatterfy_postback_log(log_id, "failed", str(exc)[:4000])
+
+
 @app.api_route("/api/integrations/chatterfy/postback", methods=["GET", "POST"])
 async def chatterfy_postback(request: Request):
     if not db_pool:
@@ -586,27 +606,11 @@ async def chatterfy_postback(request: Request):
         log_id = await insert_chatterfy_postback_log(normalized, payload, "skipped", "missing_aio_visit_uuid", None, source_ip)
         return {"status": "skipped", "reason": "missing_aio_visit_uuid", "log_id": log_id}
 
-    log_id = await insert_chatterfy_postback_log(normalized, payload, "received", None, aio_visit_uuid, source_ip)
-    aio_result = await send_aio_postback_event(
-        int(telegram_id),
-        CHATTERFY_START_EVENT,
-        unique_key=normalized.get("unique_key") or CHATTERFY_START_EVENT,
-    )
-    fields_result = await send_aio_user_fields(
-        int(telegram_id),
-        first_name=normalized.get("tg_first_name") or "",
-        username=normalized.get("tg_username") or "",
-    )
-
-    final_status = aio_result.get("status") or "unknown"
-    reason = aio_result.get("reason") or aio_result.get("error")
-    await update_chatterfy_postback_log(log_id, final_status, reason, aio_result, fields_result)
+    log_id = await insert_chatterfy_postback_log(normalized, payload, "queued", None, aio_visit_uuid, source_ip)
+    asyncio.create_task(finish_chatterfy_postback_delivery(log_id, int(telegram_id), normalized))
     return {
-        "status": final_status,
-        "reason": reason,
+        "status": "queued",
         "log_id": log_id,
-        "aio_event_id": aio_result.get("event_id"),
-        "aio_fields_status": fields_result.get("status"),
     }
 
 
