@@ -51,6 +51,23 @@ class AioTrackingTest(unittest.TestCase):
             "&arrived_revenue=0.00",
         )
 
+    def test_builds_chatterfy_start_postback_url(self):
+        url = build_aio_postback_url(
+            "10ac5afb-cbce-4465-95dc-d22a2f735574",
+            "start_chatterfy",
+            revenue="0",
+            unique_key="start_chatterfy:7097261848:contact-42",
+        )
+
+        self.assertEqual(
+            url,
+            "https://app.aio.tech/api/v1/trigger/conversion-request"
+            "?visit_uuid=10ac5afb-cbce-4465-95dc-d22a2f735574"
+            "&conversion_type_uuid=start_chatterfy"
+            "&arrived_revenue=0.00"
+            "&unique=start_chatterfy%3A7097261848%3Acontact-42",
+        )
+
     def test_builds_postback_url_with_optional_params(self):
         url = build_aio_postback_url(
             "10ac5afb-cbce-4465-95dc-d22a2f735574",
