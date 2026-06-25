@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Any, Dict, Optional
 
@@ -52,6 +53,13 @@ QUIZ_OPTIONS = {
         "Skip",
     ),
 }
+DEFAULT_QUIZ_CONFIG = {
+    step: {
+        "question": QUIZ_QUESTIONS[step],
+        "options": list(QUIZ_OPTIONS[step]),
+    }
+    for step in QUIZ_STEPS
+}
 SKIP_PHRASES = {
     "skip",
     "later",
@@ -77,12 +85,48 @@ def is_valid_quiz_step(step: Optional[str]) -> bool:
     return str(step or "").strip().lower() in QUIZ_STEPS
 
 
-def get_quiz_question(step: Optional[str]) -> str:
-    return QUIZ_QUESTIONS[normalize_quiz_step(step)]
+def normalize_quiz_config(value: Any = None) -> Dict[str, Dict[str, Any]]:
+    if isinstance(value, str) and value.strip():
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            value = {}
+    if not isinstance(value, dict):
+        value = {}
+
+    normalized: Dict[str, Dict[str, Any]] = {}
+    for step in QUIZ_STEPS:
+        default_item = DEFAULT_QUIZ_CONFIG[step]
+        raw_item = value.get(step) if isinstance(value.get(step), dict) else {}
+        question = str(raw_item.get("question") or "").strip() or default_item["question"]
+        raw_options = raw_item.get("options")
+        options = []
+        if isinstance(raw_options, (list, tuple)):
+            seen = set()
+            for option in raw_options:
+                text = str(option or "").strip()
+                key = text.lower()
+                if not text or key in seen:
+                    continue
+                seen.add(key)
+                options.append(text[:64])
+        if not options:
+            options = list(default_item["options"])
+        normalized[step] = {
+            "question": question[:600],
+            "options": options[:8],
+        }
+    return normalized
 
 
-def get_quiz_options(step: Optional[str]) -> tuple[str, ...]:
-    return QUIZ_OPTIONS[normalize_quiz_step(step)]
+def get_quiz_question(step: Optional[str], quiz_config: Any = None) -> str:
+    config = normalize_quiz_config(quiz_config)
+    return config[normalize_quiz_step(step)]["question"]
+
+
+def get_quiz_options(step: Optional[str], quiz_config: Any = None) -> tuple[str, ...]:
+    config = normalize_quiz_config(quiz_config)
+    return tuple(config[normalize_quiz_step(step)]["options"])
 
 
 def get_aio_question_field(step: Optional[str]) -> str:

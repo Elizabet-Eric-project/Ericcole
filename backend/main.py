@@ -89,6 +89,7 @@ try:
         is_active_channel_member,
         map_quiz_answer_locally,
         normalize_channel_settings,
+        normalize_quiz_config,
         normalize_quiz_step,
         normalize_quiz_answer,
     )
@@ -106,6 +107,7 @@ except ModuleNotFoundError:
         is_active_channel_member,
         map_quiz_answer_locally,
         normalize_channel_settings,
+        normalize_quiz_config,
         normalize_quiz_step,
         normalize_quiz_answer,
     )
@@ -1467,15 +1469,18 @@ async def get_support_links_row():
         "support_url": (os.getenv("SUPPORT_URL") or "").strip(),
         "channel_id": (os.getenv("CHANNEL_ID") or "").strip(),
         "check_subscription_enabled": (os.getenv("CHECK_SUBSCRIPTION_ENABLED") or "").strip(),
+        "quiz_config": {},
     }
     if not db_pool:
-        return normalize_channel_settings(fallback)
+        settings = normalize_channel_settings(fallback)
+        settings["quiz_config"] = normalize_quiz_config()
+        return settings
     try:
         async with db_pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(
                     """
-                    SELECT channel_id, channel_url, support_url, check_subscription_enabled
+                    SELECT channel_id, channel_url, support_url, check_subscription_enabled, quiz_config
                     FROM admin_support_links
                     WHERE id = 1
                     LIMIT 1
@@ -1484,9 +1489,13 @@ async def get_support_links_row():
                 row = await cur.fetchone()
     except Exception as e:
         print(f"Support links fallback: {e}")
-        return normalize_channel_settings(fallback)
+        settings = normalize_channel_settings(fallback)
+        settings["quiz_config"] = normalize_quiz_config()
+        return settings
     if not row:
-        return normalize_channel_settings(fallback)
+        settings = normalize_channel_settings(fallback)
+        settings["quiz_config"] = normalize_quiz_config()
+        return settings
     merged = {
         "channel_id": row.get("channel_id") or fallback["channel_id"],
         "channel_url": row.get("channel_url") or fallback["channel_url"],
@@ -1494,8 +1503,16 @@ async def get_support_links_row():
         "check_subscription_enabled": row.get("check_subscription_enabled")
         if row.get("check_subscription_enabled") is not None
         else fallback["check_subscription_enabled"],
+        "quiz_config": row.get("quiz_config") or fallback["quiz_config"],
     }
-    return normalize_channel_settings(merged)
+    settings = normalize_channel_settings(merged)
+    settings["quiz_config"] = normalize_quiz_config(merged.get("quiz_config"))
+    return settings
+
+
+async def get_quiz_config_row():
+    settings = await get_support_links_row()
+    return normalize_quiz_config(settings.get("quiz_config"))
 
 
 async def get_pocket_api_settings_row(include_token: bool = False):
@@ -2576,20 +2593,30 @@ async def admin_settings_update(request: Request, admin=Depends(get_admin_user))
                 channel_url = str(support_data.get("channel_url") or "").strip()[:1000]
                 support_url = str(support_data.get("support_url") or "").strip()[:1000]
                 check_subscription_enabled = 1 if bool(support_data.get("check_subscription_enabled")) else 0
+                quiz_config = normalize_quiz_config(support_data.get("quiz_config"))
+                quiz_config_json = json.dumps(quiz_config, ensure_ascii=False)
                 await cur.execute(
                     """
                     INSERT INTO admin_support_links (
-                        id, channel_id, channel_url, support_url, check_subscription_enabled, updated_by
+                        id, channel_id, channel_url, support_url, check_subscription_enabled, quiz_config, updated_by
                     )
-                    VALUES (1, %s, %s, %s, %s, %s)
+                    VALUES (1, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         channel_id = VALUES(channel_id),
                         channel_url = VALUES(channel_url),
                         support_url = VALUES(support_url),
                         check_subscription_enabled = VALUES(check_subscription_enabled),
+                        quiz_config = VALUES(quiz_config),
                         updated_by = VALUES(updated_by)
                     """,
-                    (channel_id, channel_url, support_url, check_subscription_enabled, int(admin["user_id"])),
+                    (
+                        channel_id,
+                        channel_url,
+                        support_url,
+                        check_subscription_enabled,
+                        quiz_config_json,
+                        int(admin["user_id"]),
+                    ),
                 )
             if isinstance(pocket_data, dict) and pocket_data:
                 partner_id = str(pocket_data.get("partner_id") or "").strip()[:64]
@@ -4864,6 +4891,7 @@ async def ensure_onboarding_row(user_id: int) -> Dict[str, Any]:
 
 async def send_quiz_question(chat_id: int, step: str):
     normalized_step = normalize_quiz_step(step)
+    quiz_config = await get_quiz_config_row()
     keyboard_rows = [
         [
             InlineKeyboardButton(
@@ -4871,11 +4899,11 @@ async def send_quiz_question(chat_id: int, step: str):
                 callback_data=f"{QUIZ_ANSWER_CALLBACK_PREFIX}:{normalized_step}:{index}",
             )
         ]
-        for index, option in enumerate(get_quiz_options(normalized_step))
+        for index, option in enumerate(get_quiz_options(normalized_step, quiz_config))
     ]
     await bot.send_message(
         chat_id=chat_id,
-        text=get_quiz_question(normalized_step),
+        text=get_quiz_question(normalized_step, quiz_config),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_rows),
     )
 
@@ -4917,14 +4945,15 @@ async def map_quiz_answer_with_ai(step: str, text: str) -> Optional[str]:
         return local_answer
 
     normalized_step = normalize_quiz_step(step)
-    options = list(get_quiz_options(normalized_step))
+    quiz_config = await get_quiz_config_row()
+    options = list(get_quiz_options(normalized_step, quiz_config))
     result = await ai_service.call_openai(
         [
             {"role": "system", "content": QUALIFICATION_GPT_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
-                    f"Question: {get_quiz_question(normalized_step)}\n"
+                    f"Question: {get_quiz_question(normalized_step, quiz_config)}\n"
                     f"Allowed options: {json.dumps(options, ensure_ascii=False)}\n"
                     f"User answer: {text}"
                 ),
@@ -5119,7 +5148,8 @@ async def handle_quiz_answer_callback(callback: types.CallbackQuery):
         return
     current_step = normalize_quiz_step(raw_step)
     try:
-        option = get_quiz_options(current_step)[int(raw_index)]
+        quiz_config = await get_quiz_config_row()
+        option = get_quiz_options(current_step, quiz_config)[int(raw_index)]
     except (ValueError, IndexError):
         await callback.answer("Please try again.", show_alert=True)
         return

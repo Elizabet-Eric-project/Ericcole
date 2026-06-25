@@ -13,6 +13,7 @@ from bot_funnel import (
     is_active_channel_member,
     map_quiz_answer_locally,
     normalize_channel_settings,
+    normalize_quiz_config,
     normalize_quiz_answer,
 )
 
@@ -37,6 +38,27 @@ class BotFunnelTest(unittest.TestCase):
         self.assertIn("Skip", get_quiz_options("experience"))
         self.assertIn("I have not worked with a broker", get_quiz_options("broker_experience"))
         self.assertIn("$100,000+", get_quiz_options("capital"))
+
+    def test_quiz_config_can_override_questions_and_options(self):
+        config = normalize_quiz_config(
+            {
+                "experience": {
+                    "question": "Custom question?",
+                    "options": ["One", "Two", "Two", ""],
+                }
+            }
+        )
+
+        self.assertEqual(get_quiz_question("experience", config), "Custom question?")
+        self.assertEqual(get_quiz_options("experience", config), ("One", "Two"))
+        self.assertEqual(get_quiz_question("capital", config), get_quiz_question("capital"))
+
+    def test_quiz_config_accepts_json_and_falls_back_to_defaults(self):
+        config = normalize_quiz_config('{"capital":{"question":"Deposit?","options":["Small","Large"]}}')
+
+        self.assertEqual(get_quiz_question("capital", config), "Deposit?")
+        self.assertEqual(get_quiz_options("capital", config), ("Small", "Large"))
+        self.assertEqual(get_quiz_options("bad", {}), get_quiz_options("experience"))
 
     def test_maps_free_text_answers_locally(self):
         self.assertEqual(map_quiz_answer_locally("experience", "I am a total beginner"), "I have no experience")

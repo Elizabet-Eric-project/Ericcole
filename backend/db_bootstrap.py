@@ -1,4 +1,5 @@
 import os
+import json
 import aiomysql
 
 try:
@@ -6,9 +7,19 @@ try:
 except ModuleNotFoundError:
     from analysis_ai_service import DEFAULT_ANALYSIS_GPT_MODEL, DEFAULT_ANALYSIS_GPT_PROMPT
 try:
-    from backend.bot_funnel import DEFAULT_CHANNEL_ID, DEFAULT_CHANNEL_URL, DEFAULT_CHECK_SUBSCRIPTION_ENABLED
+    from backend.bot_funnel import (
+        DEFAULT_CHANNEL_ID,
+        DEFAULT_CHANNEL_URL,
+        DEFAULT_CHECK_SUBSCRIPTION_ENABLED,
+        DEFAULT_QUIZ_CONFIG,
+    )
 except ModuleNotFoundError:
-    from bot_funnel import DEFAULT_CHANNEL_ID, DEFAULT_CHANNEL_URL, DEFAULT_CHECK_SUBSCRIPTION_ENABLED
+    from bot_funnel import (
+        DEFAULT_CHANNEL_ID,
+        DEFAULT_CHANNEL_URL,
+        DEFAULT_CHECK_SUBSCRIPTION_ENABLED,
+        DEFAULT_QUIZ_CONFIG,
+    )
 
 
 async def _get_current_db_name(conn) -> str:
@@ -280,6 +291,7 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     channel_url TEXT NULL,
                     support_url TEXT NULL,
                     check_subscription_enabled TINYINT(1) NOT NULL DEFAULT 1,
+                    quiz_config LONGTEXT NULL,
                     updated_by BIGINT NULL,
                     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -408,6 +420,7 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
         await _ensure_column(conn, db_name, "users", "blocked_at", "ALTER TABLE users ADD COLUMN blocked_at TIMESTAMP NULL DEFAULT NULL")
         await _ensure_column(conn, db_name, "admin_support_links", "channel_id", "ALTER TABLE admin_support_links ADD COLUMN channel_id BIGINT NULL")
         await _ensure_column(conn, db_name, "admin_support_links", "check_subscription_enabled", "ALTER TABLE admin_support_links ADD COLUMN check_subscription_enabled TINYINT(1) NOT NULL DEFAULT 1")
+        await _ensure_column(conn, db_name, "admin_support_links", "quiz_config", "ALTER TABLE admin_support_links ADD COLUMN quiz_config LONGTEXT NULL")
         await _ensure_column(conn, db_name, "user_onboarding", "quiz_broker_experience", "ALTER TABLE user_onboarding ADD COLUMN quiz_broker_experience VARCHAR(255) NULL")
         await _ensure_column(conn, db_name, "user_onboarding", "quiz_capital", "ALTER TABLE user_onboarding ADD COLUMN quiz_capital VARCHAR(255) NULL")
         await _ensure_column(conn, db_name, "user_onboarding", "channel_gate_completed_at", "ALTER TABLE user_onboarding ADD COLUMN channel_gate_completed_at TIMESTAMP NULL DEFAULT NULL")
@@ -894,20 +907,22 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
             await cur.execute(
                 """
                 INSERT INTO admin_support_links (
-                    id, channel_id, channel_url, support_url, check_subscription_enabled, updated_by
+                    id, channel_id, channel_url, support_url, check_subscription_enabled, quiz_config, updated_by
                 )
-                VALUES (1, %s, %s, %s, %s, NULL)
+                VALUES (1, %s, %s, %s, %s, %s, NULL)
                 ON DUPLICATE KEY UPDATE
                     channel_id = COALESCE(channel_id, VALUES(channel_id)),
                     channel_url = COALESCE(NULLIF(channel_url, ''), VALUES(channel_url)),
                     support_url = COALESCE(NULLIF(support_url, ''), VALUES(support_url)),
-                    check_subscription_enabled = COALESCE(check_subscription_enabled, VALUES(check_subscription_enabled))
+                    check_subscription_enabled = COALESCE(check_subscription_enabled, VALUES(check_subscription_enabled)),
+                    quiz_config = COALESCE(NULLIF(quiz_config, ''), VALUES(quiz_config))
                 """,
                 (
                     _env_int("CHANNEL_ID", DEFAULT_CHANNEL_ID),
                     (os.getenv("CHANNEL_URL") or "").strip() or DEFAULT_CHANNEL_URL,
                     (os.getenv("SUPPORT_URL") or "").strip(),
                     _env_int("CHECK_SUBSCRIPTION_ENABLED", DEFAULT_CHECK_SUBSCRIPTION_ENABLED),
+                    json.dumps(DEFAULT_QUIZ_CONFIG, ensure_ascii=False),
                 ),
             )
 
