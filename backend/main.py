@@ -78,6 +78,7 @@ except ModuleNotFoundError:
 try:
     from backend.bot_funnel import (
         CHANNEL_SUBSCRIBE_EVENT,
+        CHATTERFY_BOT_START_EVENT,
         CHATTERFY_START_EVENT,
         QUIZ_COMPLETE_EVENT,
         get_next_quiz_step,
@@ -96,6 +97,7 @@ try:
 except ModuleNotFoundError:
     from bot_funnel import (
         CHANNEL_SUBSCRIBE_EVENT,
+        CHATTERFY_BOT_START_EVENT,
         CHATTERFY_START_EVENT,
         QUIZ_COMPLETE_EVENT,
         get_next_quiz_step,
@@ -581,7 +583,7 @@ async def finish_chatterfy_postback_delivery(log_id: int, telegram_id: int, norm
             unique_key=normalized.get("unique_key") or event_slug,
         )
         fields_result = None
-        if event_slug == CHATTERFY_START_EVENT:
+        if event_slug in {CHATTERFY_START_EVENT, CHATTERFY_BOT_START_EVENT}:
             fields_result = await send_aio_user_fields(
                 int(telegram_id),
                 first_name=normalized.get("tg_first_name") or "",
@@ -614,7 +616,7 @@ async def chatterfy_postback(request: Request):
     event_slug = normalized.get("event_slug")
     telegram_id = normalized.get("telegram_id")
 
-    if event_slug not in {CHATTERFY_START_EVENT, CHANNEL_SUBSCRIBE_EVENT}:
+    if event_slug not in {CHATTERFY_START_EVENT, CHATTERFY_BOT_START_EVENT, CHANNEL_SUBSCRIBE_EVENT}:
         log_id = await insert_chatterfy_postback_log(normalized, payload, "skipped", "unsupported_event", None, source_ip)
         return {"status": "skipped", "reason": "unsupported_event", "log_id": log_id}
 

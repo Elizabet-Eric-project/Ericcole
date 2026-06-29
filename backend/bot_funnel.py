@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 BOT_START_EVENT = "bot_start"
 CHATTERFY_START_EVENT = "start_chatterfy"
+CHATTERFY_BOT_START_EVENT = "start_bot_chatterfy"
 QUIZ_COMPLETE_EVENT = "quiz_complete"
 CHANNEL_SUBSCRIBE_EVENT = "channel_subscribe"
 CHATTERFY_CHANNEL_SUBSCRIBE_EVENT = CHANNEL_SUBSCRIBE_EVENT
