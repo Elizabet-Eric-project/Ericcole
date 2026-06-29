@@ -13,6 +13,8 @@ CHATTERFY_ALLOWED_EVENTS = {
     "subscription": CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
     "channel_subscribe": CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
     "channel_subscription": CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
+    "subscribe_channel": CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
+    "request_subscribe_channel": CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
     "subscribe_telegram_channel": CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
     "join_request_telegram_channel": CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
 }
