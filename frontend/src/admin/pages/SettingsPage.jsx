@@ -733,7 +733,7 @@ export default function SettingsPage({ adminUser }) {
         key: 'support',
         icon: '🔗',
         title: 'Старт и канал',
-        subtitle: checkSubscriptionEnabled ? 'Опросник и проверка подписки' : 'Опросник без проверки подписки',
+        subtitle: 'Опросник и событие подписки из Chatterfy',
       },
       {
         key: 'pocket',
@@ -1278,17 +1278,18 @@ export default function SettingsPage({ adminUser }) {
         </div>
 
         <div className="admin-field">
-          <label className="admin-label">Проверять подписку</label>
+          <label className="admin-label">Событие подписки</label>
           <label className="admin-toggle-line">
             <input
               type="checkbox"
               checked={checkSubscriptionEnabled}
               onChange={(e) => setCheckSubscriptionEnabled(e.target.checked)}
             />{' '}
-            {checkSubscriptionEnabled ? 'Да' : 'Нет'}
+            {checkSubscriptionEnabled ? 'Chatterfy' : 'Без события'}
           </label>
           <div className="admin-muted">
-            Если включено, бот откроет меню только после успешной проверки подписки.
+            Бот не проверяет подписку кнопкой. Факт подписки приходит postback-событием из Chatterfy,
+            а в Telegram показывается кнопка перехода дальше.
           </div>
         </div>
 

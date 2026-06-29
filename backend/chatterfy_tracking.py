@@ -3,11 +3,18 @@ from typing import Any, Dict, Optional
 
 
 CHATTERFY_START_EVENT = "start_chatterfy"
+CHATTERFY_CHANNEL_SUBSCRIBE_EVENT = "channel_subscribe"
 CHATTERFY_ALLOWED_EVENTS = {
     "start": CHATTERFY_START_EVENT,
     "bot_start": CHATTERFY_START_EVENT,
     "dialog": CHATTERFY_START_EVENT,
     "start_chatterfy": CHATTERFY_START_EVENT,
+    "subscribe": CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
+    "subscription": CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
+    "channel_subscribe": CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
+    "channel_subscription": CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
+    "subscribe_telegram_channel": CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
+    "join_request_telegram_channel": CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
 }
 
 

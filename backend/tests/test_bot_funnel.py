@@ -1,6 +1,7 @@
 import unittest
 
 from bot_funnel import (
+    CHATTERFY_CHANNEL_SUBSCRIBE_EVENT,
     CHANNEL_SUBSCRIBE_EVENT,
     DEFAULT_CHANNEL_ID,
     DEFAULT_CHANNEL_URL,
@@ -114,6 +115,7 @@ class BotFunnelTest(unittest.TestCase):
     def test_event_slugs_are_stable(self):
         self.assertEqual(QUIZ_COMPLETE_EVENT, "quiz_complete")
         self.assertEqual(CHANNEL_SUBSCRIBE_EVENT, "channel_subscribe")
+        self.assertEqual(CHATTERFY_CHANNEL_SUBSCRIBE_EVENT, CHANNEL_SUBSCRIBE_EVENT)
 
 
 if __name__ == "__main__":

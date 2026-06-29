@@ -554,18 +554,39 @@ async def update_chatterfy_postback_log(
             )
 
 
+async def mark_channel_subscription_from_chatterfy(user_id: int) -> None:
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO user_onboarding (user_id, channel_subscribed_at, channel_gate_completed_at)
+                VALUES (%s, NOW(), NOW())
+                ON DUPLICATE KEY UPDATE
+                    channel_subscribed_at = COALESCE(channel_subscribed_at, NOW()),
+                    channel_gate_completed_at = COALESCE(channel_gate_completed_at, NOW())
+                """,
+                (user_id,),
+            )
+
+
 async def finish_chatterfy_postback_delivery(log_id: int, telegram_id: int, normalized: Dict[str, Any]) -> None:
     try:
+        event_slug = normalized.get("event_slug") or CHATTERFY_START_EVENT
+        if event_slug == CHANNEL_SUBSCRIBE_EVENT:
+            await mark_channel_subscription_from_chatterfy(int(telegram_id))
+
         aio_result = await send_aio_postback_event(
             int(telegram_id),
-            CHATTERFY_START_EVENT,
-            unique_key=normalized.get("unique_key") or CHATTERFY_START_EVENT,
+            event_slug,
+            unique_key=normalized.get("unique_key") or event_slug,
         )
-        fields_result = await send_aio_user_fields(
-            int(telegram_id),
-            first_name=normalized.get("tg_first_name") or "",
-            username=normalized.get("tg_username") or "",
-        )
+        fields_result = None
+        if event_slug == CHATTERFY_START_EVENT:
+            fields_result = await send_aio_user_fields(
+                int(telegram_id),
+                first_name=normalized.get("tg_first_name") or "",
+                username=normalized.get("tg_username") or "",
+            )
 
         final_status = aio_result.get("status") or "unknown"
         reason = aio_result.get("reason") or aio_result.get("error")
@@ -593,7 +614,7 @@ async def chatterfy_postback(request: Request):
     event_slug = normalized.get("event_slug")
     telegram_id = normalized.get("telegram_id")
 
-    if event_slug != CHATTERFY_START_EVENT:
+    if event_slug not in {CHATTERFY_START_EVENT, CHANNEL_SUBSCRIBE_EVENT}:
         log_id = await insert_chatterfy_postback_log(normalized, payload, "skipped", "unsupported_event", None, source_ip)
         return {"status": "skipped", "reason": "unsupported_event", "log_id": log_id}
 
@@ -4923,15 +4944,8 @@ async def send_channel_gate(chat_id: int):
     settings = await get_support_links_row()
     keyboard_rows = [
         [InlineKeyboardButton(text="Open channel", url=settings["channel_url"])],
+        [InlineKeyboardButton(text="Go to trading", callback_data=FUNNEL_CONTINUE_CALLBACK)],
     ]
-    if settings["check_subscription_enabled"]:
-        keyboard_rows.append(
-            [InlineKeyboardButton(text="Check subscription", callback_data=FUNNEL_CHECK_CHANNEL_CALLBACK)]
-        )
-    else:
-        keyboard_rows.append(
-            [InlineKeyboardButton(text="Go to trading", callback_data=FUNNEL_CONTINUE_CALLBACK)]
-        )
     await bot.send_message(
         chat_id=chat_id,
         text=f"Here is the channel link:\n{settings['channel_url']}",
@@ -5197,42 +5211,7 @@ async def handle_funnel_continue(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda callback: callback.data == FUNNEL_CHECK_CHANNEL_CALLBACK)
 async def handle_funnel_check_channel(callback: types.CallbackQuery):
-    if not callback.message or not callback.from_user:
-        return
-    user_id = int(callback.from_user.id)
-    settings = await get_support_links_row()
-    try:
-        member = await bot.get_chat_member(chat_id=settings["channel_id"], user_id=user_id)
-        is_subscribed = is_active_channel_member(getattr(member, "status", None))
-    except Exception as e:
-        print(f"[Funnel] Channel subscription check failed: {e}")
-        await callback.answer(
-            "We couldn't check your subscription. Please try again in a minute.",
-            show_alert=True,
-        )
-        return
-
-    if not is_subscribed:
-        await callback.answer("Subscription was not found yet.", show_alert=True)
-        return
-
-    if db_pool:
-        async with db_pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
-                    UPDATE user_onboarding
-                    SET channel_subscribed_at = COALESCE(channel_subscribed_at, NOW()),
-                        channel_gate_completed_at = COALESCE(channel_gate_completed_at, NOW())
-                    WHERE user_id = %s
-                    """,
-                    (user_id,),
-                )
-
-    asyncio.create_task(send_aio_postback_event(user_id, CHANNEL_SUBSCRIBE_EVENT))
-    user_name = callback.from_user.first_name or callback.from_user.username or "Trader"
-    await callback.answer("Subscription confirmed.")
-    await send_main_menu(callback.message.chat.id, user_id, user_name)
+    await handle_funnel_continue(callback)
 
 class AIChatRequest(BaseModel):
     user_id: Optional[int] = None
