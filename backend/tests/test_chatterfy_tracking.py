@@ -23,6 +23,8 @@ class ChatterfyTrackingTest(unittest.TestCase):
             "subscription",
             "channel_subscribe",
             "subscribe-telegram-channel",
+            "subscribe channel",
+            "request subscribe channel",
             "join-request-telegram-channel",
         ):
             self.assertEqual(normalize_chatterfy_event(raw), CHATTERFY_CHANNEL_SUBSCRIBE_EVENT)
