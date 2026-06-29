@@ -23,6 +23,7 @@ class BotButtonLabelsTest(unittest.TestCase):
         source = backend_main.read_text(encoding="utf-8")
 
         self.assertIn('text="Go to trading"', source)
+        self.assertNotIn('text="Check subscription"', source)
         self.assertNotIn('text="Продолжить"', source)
 
 

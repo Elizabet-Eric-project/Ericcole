@@ -3,6 +3,7 @@ import Loader from '../Loader/Loader';
 import Lottie from 'lottie-react';
 import animationData from '../../assets/analize.json';
 import { apiFetchJson } from '../../lib/api';
+import SignalGateModal from '../SignalGateModal';
 import './BinarySignalSettings.css';
 import iconEdit from '../../assets/icons/edit.svg?url';
 
@@ -584,16 +585,7 @@ export default function BinarySignalSettings({
       )}
 
       {signalGateOpen ? (
-        <div className="signal-gate-overlay" onClick={() => setSignalGateOpen(false)}>
-          <div className="signal-gate-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Signal access</h3>
-            <p>Signal access has not been issued for your account yet.</p>
-            <p className="signal-gate-note">Once access is enabled, request a signal again.</p>
-            <button className="conduct-analysis-btn" type="button" onClick={() => setSignalGateOpen(false)}>
-              OK
-            </button>
-          </div>
-        </div>
+        <SignalGateModal onClose={() => setSignalGateOpen(false)} />
       ) : null}
 
 

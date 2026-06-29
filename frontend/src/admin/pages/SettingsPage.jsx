@@ -21,6 +21,46 @@ const BINARY_STREAM_MARKETS = [
   { key: 'stocks', title: 'Акции' },
   { key: 'crypto', title: 'Crypto' },
 ];
+const QUIZ_STEPS = [
+  { key: 'experience', title: 'Вопрос 1', hint: 'Опыт в трейдинге' },
+  { key: 'broker_experience', title: 'Вопрос 2', hint: 'Опыт с брокером' },
+  { key: 'capital', title: 'Вопрос 3', hint: 'Капитал / депозит' },
+];
+const DEFAULT_QUIZ_CONFIG = {
+  experience: {
+    question: 'What is your trading experience?',
+    options: [
+      'I have no experience',
+      'Less than 1 year',
+      '1-2 years',
+      '2-5 years',
+      'More than 5 years',
+      'Skip',
+    ],
+  },
+  broker_experience: {
+    question: 'Have you worked with any of these brokers before?',
+    options: [
+      'Broker 1',
+      'Broker 2',
+      'Broker 3',
+      'Other broker',
+      'I have not worked with a broker',
+      'Skip',
+    ],
+  },
+  capital: {
+    question: 'What is your trading capital (deposit)?\nThis helps us suggest a more relevant broker setup later.\nTrading involves risk.',
+    options: [
+      'Up to $100',
+      '$100-$1,000',
+      '$1,000-$10,000',
+      '$10,000-$100,000',
+      '$100,000+',
+      'Skip',
+    ],
+  },
+};
 
 const normalizeIndicatorKey = (value) =>
   String(value || '')
@@ -79,6 +119,47 @@ const formatLevel = (value) => {
   return numeric.toFixed(5);
 };
 
+const normalizeQuizConfig = (rawConfig) => {
+  const source = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
+  return QUIZ_STEPS.reduce((acc, step) => {
+    const fallback = DEFAULT_QUIZ_CONFIG[step.key];
+    const rawItem = source[step.key] && typeof source[step.key] === 'object' ? source[step.key] : {};
+    const question = String(rawItem.question || '').trim() || fallback.question;
+    const seen = new Set();
+    const options = Array.isArray(rawItem.options)
+      ? rawItem.options
+          .map((item) => String(item || '').trim())
+          .filter((item) => {
+            const key = item.toLowerCase();
+            if (!item || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .slice(0, 8)
+      : [];
+    acc[step.key] = {
+      question,
+      options: options.length ? options : [...fallback.options],
+    };
+    return acc;
+  }, {});
+};
+
+const normalizeIndicatorOverride = (entry) => {
+  if (entry && typeof entry === 'object') {
+    const signal = String(entry.signal || 'AUTO').toUpperCase();
+    return {
+      signal: INDICATOR_SIGNAL_OPTIONS.includes(signal) ? signal : 'AUTO',
+      value: entry.value === null || entry.value === undefined ? '' : String(entry.value),
+    };
+  }
+  const signal = String(entry || 'AUTO').toUpperCase();
+  return {
+    signal: INDICATOR_SIGNAL_OPTIONS.includes(signal) ? signal : 'AUTO',
+    value: '',
+  };
+};
+
 const hashString = (input) => {
   const str = String(input || '');
   let hash = 0;
@@ -115,7 +196,7 @@ const buildPreviewSignals = ({
 
   const autoIndexes = [];
   prepared.forEach((item) => {
-    const overridden = manualMode ? indicatorOverrides[item.norm] : null;
+    const overridden = manualMode ? normalizeIndicatorOverride(indicatorOverrides[item.norm]).signal : null;
     if (overridden && overridden !== 'AUTO') {
       item.signal = overridden;
     } else {
@@ -204,6 +285,7 @@ export default function SettingsPage({ adminUser }) {
   const [channelUrl, setChannelUrl] = useState('');
   const [checkSubscriptionEnabled, setCheckSubscriptionEnabled] = useState(true);
   const [supportUrl, setSupportUrl] = useState('');
+  const [quizConfig, setQuizConfig] = useState(() => normalizeQuizConfig());
   const [pocketPartnerId, setPocketPartnerId] = useState('');
   const [pocketApiToken, setPocketApiToken] = useState('');
   const [pocketApiTokenMasked, setPocketApiTokenMasked] = useState('');
@@ -257,12 +339,12 @@ export default function SettingsPage({ adminUser }) {
       const overridesRaw = streams.indicator_overrides;
       const nextOverrides = {};
       if (overridesRaw && typeof overridesRaw === 'object') {
-        Object.entries(overridesRaw).forEach(([rawKey, rawSignal]) => {
+        Object.entries(overridesRaw).forEach(([rawKey, rawEntry]) => {
           const norm = normalizeIndicatorKey(rawKey);
-          const signal = String(rawSignal || '').toUpperCase();
+          const entry = normalizeIndicatorOverride(rawEntry);
           if (!norm) return;
-          if (signal === 'BUY' || signal === 'SELL' || signal === 'NEUTRAL') {
-            nextOverrides[norm] = signal;
+          if (entry.signal !== 'AUTO' || entry.value.trim()) {
+            nextOverrides[norm] = entry;
           }
         });
       }
@@ -288,6 +370,7 @@ export default function SettingsPage({ adminUser }) {
       setChannelUrl(support.channel_url || '');
       setCheckSubscriptionEnabled(Boolean(Number(support.check_subscription_enabled ?? 1)));
       setSupportUrl(support.support_url || '');
+      setQuizConfig(normalizeQuizConfig(support.quiz_config));
 
       const pocket = settingsRes?.settings?.pocket_api || {};
       setPocketPartnerId(pocket.partner_id || '');
@@ -404,6 +487,17 @@ export default function SettingsPage({ adminUser }) {
       setError('Текущая цена должна быть числом');
       return;
     }
+    if (shouldSaveSupport) {
+      const preparedQuiz = normalizeQuizConfig(quizConfig);
+      const invalidStep = QUIZ_STEPS.find((step) => {
+        const item = preparedQuiz[step.key];
+        return !String(item.question || '').trim() || !Array.isArray(item.options) || item.options.length === 0;
+      });
+      if (invalidStep) {
+        setError(`Заполните вопрос и хотя бы один вариант ответа: ${invalidStep.title}`);
+        return;
+      }
+    }
 
     setSaving(true);
     setError('');
@@ -445,6 +539,7 @@ export default function SettingsPage({ adminUser }) {
           channel_url: channelUrl.trim(),
           check_subscription_enabled: checkSubscriptionEnabled,
           support_url: supportUrl.trim(),
+          quiz_config: normalizeQuizConfig(quizConfig),
         };
       }
 
@@ -527,13 +622,91 @@ export default function SettingsPage({ adminUser }) {
   const setIndicatorSignal = (indicatorNorm, signal) => {
     setStreamIndicatorOverrides((prev) => {
       const next = { ...prev };
-      if (signal === 'AUTO') {
+      const previous = normalizeIndicatorOverride(next[indicatorNorm]);
+      const value = previous.value;
+      if (signal === 'AUTO' && !value.trim()) {
         delete next[indicatorNorm];
       } else {
-        next[indicatorNorm] = signal;
+        next[indicatorNorm] = { ...previous, signal };
       }
       return next;
     });
+  };
+
+  const setIndicatorValue = (indicatorNorm, value) => {
+    setStreamIndicatorOverrides((prev) => {
+      const next = { ...prev };
+      const previous = normalizeIndicatorOverride(next[indicatorNorm]);
+      if (!String(value || '').trim() && previous.signal === 'AUTO') {
+        delete next[indicatorNorm];
+      } else {
+        next[indicatorNorm] = { ...previous, value };
+      }
+      return next;
+    });
+  };
+
+  const updateQuizQuestion = (stepKey, question) => {
+    setQuizConfig((prev) => ({
+      ...prev,
+      [stepKey]: {
+        ...normalizeQuizConfig(prev)[stepKey],
+        question,
+      },
+    }));
+  };
+
+  const updateQuizOption = (stepKey, index, value) => {
+    setQuizConfig((prev) => {
+      const current = normalizeQuizConfig(prev)[stepKey];
+      const options = [...current.options];
+      options[index] = value;
+      return {
+        ...prev,
+        [stepKey]: {
+          ...current,
+          options,
+        },
+      };
+    });
+  };
+
+  const addQuizOption = (stepKey) => {
+    setQuizConfig((prev) => {
+      const current = normalizeQuizConfig(prev)[stepKey];
+      if (current.options.length >= 8) return prev;
+      return {
+        ...prev,
+        [stepKey]: {
+          ...current,
+          options: [...current.options, 'New option'],
+        },
+      };
+    });
+  };
+
+  const removeQuizOption = (stepKey, index) => {
+    setQuizConfig((prev) => {
+      const current = normalizeQuizConfig(prev)[stepKey];
+      if (current.options.length <= 1) return prev;
+      return {
+        ...prev,
+        [stepKey]: {
+          ...current,
+          options: current.options.filter((_, optionIndex) => optionIndex !== index),
+        },
+      };
+    });
+  };
+
+  const resetQuizStep = (stepKey) => {
+    setQuizConfig((prev) => ({
+      ...prev,
+      [stepKey]: {
+        question: DEFAULT_QUIZ_CONFIG[stepKey].question,
+        options: [...DEFAULT_QUIZ_CONFIG[stepKey].options],
+      },
+    }));
   };
 
   const cards = useMemo(
@@ -559,8 +732,8 @@ export default function SettingsPage({ adminUser }) {
       {
         key: 'support',
         icon: '🔗',
-        title: 'Канал',
-        subtitle: checkSubscriptionEnabled ? 'Проверка подписки включена' : 'Проверка подписки выключена',
+        title: 'Старт и канал',
+        subtitle: 'Опросник и событие подписки из Chatterfy',
       },
       {
         key: 'pocket',
@@ -877,21 +1050,29 @@ export default function SettingsPage({ adminUser }) {
                   strategyIndicators.length ? (
                     <div className="admin-stream-indicators-list">
                       {strategyIndicators.map((indicator) => {
-                        const current = streamIndicatorOverrides[indicator.norm] || 'AUTO';
+                        const current = normalizeIndicatorOverride(streamIndicatorOverrides[indicator.norm]);
                         return (
                           <div key={indicator.norm} className="admin-stream-indicator-row">
                             <div className="admin-stream-indicator-name">{indicator.name}</div>
-                            <div className="admin-stream-mini-toggle">
-                              {INDICATOR_SIGNAL_OPTIONS.map((option) => (
-                                <button
-                                  key={option}
-                                  type="button"
-                                  className={`admin-stream-mini-btn ${current === option ? 'active' : ''}`}
-                                  onClick={() => setIndicatorSignal(indicator.norm, option)}
-                                >
-                                  {option}
-                                </button>
-                              ))}
+                            <div className="admin-stream-indicator-controls">
+                              <div className="admin-stream-mini-toggle">
+                                {INDICATOR_SIGNAL_OPTIONS.map((option) => (
+                                  <button
+                                    key={option}
+                                    type="button"
+                                    className={`admin-stream-mini-btn ${current.signal === option ? 'active' : ''}`}
+                                    onClick={() => setIndicatorSignal(indicator.norm, option)}
+                                  >
+                                    {option}
+                                  </button>
+                                ))}
+                              </div>
+                              <input
+                                className="admin-input admin-stream-value-input"
+                                value={current.value}
+                                onChange={(e) => setIndicatorValue(indicator.norm, e.target.value)}
+                                placeholder="Value"
+                              />
                             </div>
                           </div>
                         );
@@ -933,7 +1114,7 @@ export default function SettingsPage({ adminUser }) {
             {previewData.indicators.map((indicator) => (
               <div key={`${indicator.norm}-${indicator.idx}`} className="admin-stream-preview-item">
                 <div className="admin-stream-preview-name">{indicator.name}</div>
-                <div className="admin-stream-preview-value">---</div>
+                <div className="admin-stream-preview-value">{normalizeIndicatorOverride(streamIndicatorOverrides[indicator.norm]).value || '---'}</div>
                 <div className={`admin-stream-preview-signal sig-${indicator.signal.toLowerCase()}`}>
                   {indicator.signal}
                 </div>
@@ -1008,29 +1189,107 @@ export default function SettingsPage({ adminUser }) {
   }
 
   if (activeSection === 'support') {
+    const visibleQuizConfig = normalizeQuizConfig(quizConfig);
     return (
       <div className="admin-card admin-settings-detail">
         <div className="admin-row-between">
-          <h3 className="admin-section-title">Канал</h3>
+          <h3 className="admin-section-title">Старт и канал</h3>
           <button className="admin-btn-outline" onClick={goMenu}>← К карточкам</button>
         </div>
 
         <div className="admin-muted">
-          Эти настройки используются в Telegram-воронке и в разделе поддержки.
+          Эти настройки используются в Telegram-воронке: стартовый опросник, кнопки ответов и переход в канал.
+        </div>
+
+        <div className="admin-funnel-quiz">
+          <div className="admin-funnel-head">
+            <div>
+              <div className="admin-funnel-title">Стартовый опросник</div>
+              <div className="admin-muted">Каждый вариант станет отдельной inline-кнопкой в Telegram.</div>
+            </div>
+            <button
+              type="button"
+              className="admin-btn-outline"
+              onClick={() => setQuizConfig(normalizeQuizConfig())}
+            >
+              Сбросить все
+            </button>
+          </div>
+
+          {QUIZ_STEPS.map((step) => {
+            const item = visibleQuizConfig[step.key];
+            return (
+              <div className="admin-quiz-card" key={step.key}>
+                <div className="admin-row-between">
+                  <div>
+                    <div className="admin-quiz-title">{step.title}</div>
+                    <div className="admin-muted">{step.hint}</div>
+                  </div>
+                  <button type="button" className="admin-mini-action" onClick={() => resetQuizStep(step.key)}>
+                    Сбросить
+                  </button>
+                </div>
+
+                <label className="admin-label">Текст вопроса</label>
+                <textarea
+                  className="admin-input admin-textarea admin-quiz-question"
+                  value={item.question}
+                  onChange={(e) => updateQuizQuestion(step.key, e.target.value)}
+                  rows={3}
+                  maxLength={600}
+                />
+
+                <div className="admin-quiz-options-head">
+                  <label className="admin-label">Кнопки ответов</label>
+                  <button
+                    type="button"
+                    className="admin-mini-action"
+                    onClick={() => addQuizOption(step.key)}
+                    disabled={item.options.length >= 8}
+                  >
+                    + Вариант
+                  </button>
+                </div>
+
+                <div className="admin-quiz-options">
+                  {item.options.map((option, index) => (
+                    <div className="admin-quiz-option-row" key={`${step.key}-${index}`}>
+                      <span className="admin-quiz-option-index">{index + 1}</span>
+                      <input
+                        className="admin-input"
+                        value={option}
+                        onChange={(e) => updateQuizOption(step.key, index, e.target.value)}
+                        maxLength={64}
+                      />
+                      <button
+                        type="button"
+                        className="admin-mini-action danger"
+                        onClick={() => removeQuizOption(step.key, index)}
+                        disabled={item.options.length <= 1}
+                      >
+                        Удалить
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         <div className="admin-field">
-          <label className="admin-label">Проверять подписку</label>
+          <label className="admin-label">Событие подписки</label>
           <label className="admin-toggle-line">
             <input
               type="checkbox"
               checked={checkSubscriptionEnabled}
               onChange={(e) => setCheckSubscriptionEnabled(e.target.checked)}
             />{' '}
-            {checkSubscriptionEnabled ? 'Да' : 'Нет'}
+            {checkSubscriptionEnabled ? 'Chatterfy' : 'Без события'}
           </label>
           <div className="admin-muted">
-            Если включено, бот откроет меню только после успешной проверки подписки.
+            Бот не проверяет подписку кнопкой. Факт подписки приходит postback-событием из Chatterfy,
+            а в Telegram показывается кнопка перехода дальше.
           </div>
         </div>
 
@@ -1066,7 +1325,7 @@ export default function SettingsPage({ adminUser }) {
 
         <div className="admin-row-actions">
           <button className="admin-btn" onClick={() => saveSettings('support')} disabled={saving}>
-            {saving ? 'Сохранение...' : 'Сохранить канал'}
+            {saving ? 'Сохранение...' : 'Сохранить воронку'}
           </button>
         </div>
 

@@ -36,9 +36,23 @@ try:
 except ModuleNotFoundError:
     from stream_matching import stream_requested_asset_matches
 try:
-    from backend.market_symbol_mapping import get_forex_stock_assets, get_twelvedata_symbol_candidates, has_explicit_twelvedata_mapping
+    from backend.market_symbol_mapping import (
+        get_custom_forex_currency_assets,
+        get_custom_forex_index_assets,
+        get_forex_stock_assets,
+        get_twelvedata_symbol_candidates,
+        has_explicit_twelvedata_mapping,
+        merge_custom_market_assets,
+    )
 except ModuleNotFoundError:
-    from market_symbol_mapping import get_forex_stock_assets, get_twelvedata_symbol_candidates, has_explicit_twelvedata_mapping
+    from market_symbol_mapping import (
+        get_custom_forex_currency_assets,
+        get_custom_forex_index_assets,
+        get_forex_stock_assets,
+        get_twelvedata_symbol_candidates,
+        has_explicit_twelvedata_mapping,
+        merge_custom_market_assets,
+    )
 try:
     from backend.pocket_api import POCKET_USER_INFO_ENDPOINT_TEMPLATE, build_pocket_user_info_url, mask_secret
 except ModuleNotFoundError:
@@ -75,6 +89,7 @@ try:
         is_active_channel_member,
         map_quiz_answer_locally,
         normalize_channel_settings,
+        normalize_quiz_config,
         normalize_quiz_step,
         normalize_quiz_answer,
     )
@@ -92,6 +107,7 @@ except ModuleNotFoundError:
         is_active_channel_member,
         map_quiz_answer_locally,
         normalize_channel_settings,
+        normalize_quiz_config,
         normalize_quiz_step,
         normalize_quiz_answer,
     )
@@ -538,6 +554,47 @@ async def update_chatterfy_postback_log(
             )
 
 
+async def mark_channel_subscription_from_chatterfy(user_id: int) -> None:
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO user_onboarding (user_id, channel_subscribed_at, channel_gate_completed_at)
+                VALUES (%s, NOW(), NOW())
+                ON DUPLICATE KEY UPDATE
+                    channel_subscribed_at = COALESCE(channel_subscribed_at, NOW()),
+                    channel_gate_completed_at = COALESCE(channel_gate_completed_at, NOW())
+                """,
+                (user_id,),
+            )
+
+
+async def finish_chatterfy_postback_delivery(log_id: int, telegram_id: int, normalized: Dict[str, Any]) -> None:
+    try:
+        event_slug = normalized.get("event_slug") or CHATTERFY_START_EVENT
+        if event_slug == CHANNEL_SUBSCRIBE_EVENT:
+            await mark_channel_subscription_from_chatterfy(int(telegram_id))
+
+        aio_result = await send_aio_postback_event(
+            int(telegram_id),
+            event_slug,
+            unique_key=normalized.get("unique_key") or event_slug,
+        )
+        fields_result = None
+        if event_slug == CHATTERFY_START_EVENT:
+            fields_result = await send_aio_user_fields(
+                int(telegram_id),
+                first_name=normalized.get("tg_first_name") or "",
+                username=normalized.get("tg_username") or "",
+            )
+
+        final_status = aio_result.get("status") or "unknown"
+        reason = aio_result.get("reason") or aio_result.get("error")
+        await update_chatterfy_postback_log(log_id, final_status, reason, aio_result, fields_result)
+    except Exception as exc:
+        await update_chatterfy_postback_log(log_id, "failed", str(exc)[:4000])
+
+
 @app.api_route("/api/integrations/chatterfy/postback", methods=["GET", "POST"])
 async def chatterfy_postback(request: Request):
     if not db_pool:
@@ -557,7 +614,7 @@ async def chatterfy_postback(request: Request):
     event_slug = normalized.get("event_slug")
     telegram_id = normalized.get("telegram_id")
 
-    if event_slug != CHATTERFY_START_EVENT:
+    if event_slug not in {CHATTERFY_START_EVENT, CHANNEL_SUBSCRIBE_EVENT}:
         log_id = await insert_chatterfy_postback_log(normalized, payload, "skipped", "unsupported_event", None, source_ip)
         return {"status": "skipped", "reason": "unsupported_event", "log_id": log_id}
 
@@ -586,27 +643,11 @@ async def chatterfy_postback(request: Request):
         log_id = await insert_chatterfy_postback_log(normalized, payload, "skipped", "missing_aio_visit_uuid", None, source_ip)
         return {"status": "skipped", "reason": "missing_aio_visit_uuid", "log_id": log_id}
 
-    log_id = await insert_chatterfy_postback_log(normalized, payload, "received", None, aio_visit_uuid, source_ip)
-    aio_result = await send_aio_postback_event(
-        int(telegram_id),
-        CHATTERFY_START_EVENT,
-        unique_key=normalized.get("unique_key") or CHATTERFY_START_EVENT,
-    )
-    fields_result = await send_aio_user_fields(
-        int(telegram_id),
-        first_name=normalized.get("tg_first_name") or "",
-        username=normalized.get("tg_username") or "",
-    )
-
-    final_status = aio_result.get("status") or "unknown"
-    reason = aio_result.get("reason") or aio_result.get("error")
-    await update_chatterfy_postback_log(log_id, final_status, reason, aio_result, fields_result)
+    log_id = await insert_chatterfy_postback_log(normalized, payload, "queued", None, aio_visit_uuid, source_ip)
+    asyncio.create_task(finish_chatterfy_postback_delivery(log_id, int(telegram_id), normalized))
     return {
-        "status": final_status,
-        "reason": reason,
+        "status": "queued",
         "log_id": log_id,
-        "aio_event_id": aio_result.get("event_id"),
-        "aio_fields_status": fields_result.get("status"),
     }
 
 
@@ -715,13 +756,23 @@ async def get_stream_settings_row():
     if not isinstance(parsed_overrides, dict):
         parsed_overrides = {}
     normalized_overrides = {}
-    for raw_key, raw_signal in parsed_overrides.items():
+    for raw_key, raw_entry in parsed_overrides.items():
         key_norm = str(raw_key or "").strip().upper().replace(" ", "").replace("_", "").replace("-", "")
         if not key_norm:
             continue
-        signal = str(raw_signal or "").strip().upper()
+        if isinstance(raw_entry, dict):
+            signal = str(raw_entry.get("signal") or "AUTO").strip().upper()
+            value = str(raw_entry.get("value") or "").strip()
+        else:
+            signal = str(raw_entry or "").strip().upper()
+            value = ""
+        entry = {}
         if signal in ("BUY", "SELL", "NEUTRAL"):
-            normalized_overrides[key_norm] = signal
+            entry["signal"] = signal
+        if value:
+            entry["value"] = value[:64]
+        if entry:
+            normalized_overrides[key_norm] = entry
     settings["indicator_overrides"] = normalized_overrides
     settings["message"] = str(settings.get("message") or "")
     emulation_analysis_type = str(settings.get("emulation_analysis_type") or "forex").strip().lower()
@@ -846,7 +897,7 @@ def normalize_forex_stream_assets(market: str, payload: Any) -> List[Dict[str, A
             continue
         seen.add(key)
         label = str(row.get("name") or row.get("label") or row.get("display_name") or pair).strip()
-        item = {"pair": pair, "label": label, "market": market}
+        item = {"pair": pair, "apiVal": pair, "symbol": pair, "name": label, "label": label, "market": market}
         if row.get("icon"):
             item["icon"] = row.get("icon")
         if row.get("country"):
@@ -878,8 +929,10 @@ async def get_forex_stream_options_payload(market: str) -> Dict[str, Any]:
     if forex_market == "currencies":
         binary_payload = await get_market_options_payload("forex", DEVSBITE_MIN_PAYOUT)
         pairs = [{"pair": item.get("pair"), "label": item.get("pair"), "market": forex_market} for item in binary_payload.get("pairs") or [] if item.get("pair")]
+        pairs = merge_custom_market_assets(pairs, get_custom_forex_currency_assets())
     elif forex_market == "indices":
         pairs = normalize_forex_stream_assets(forex_market, await fetch_devsbite_json("pairs/indices"))
+        pairs = merge_custom_market_assets(pairs, get_custom_forex_index_assets())
     elif forex_market == "commodities":
         pairs = normalize_forex_stream_assets(forex_market, await fetch_devsbite_json("pairs/commodity"))
     else:
@@ -1144,7 +1197,12 @@ def apply_stream_override_to_analysis(analysis_data: dict, stream_settings: dict
         locked_signals = {}
         for indicator_key in indicator_keys:
             for alias in aliases_for_indicator(indicator_key):
-                manual_signal = str(manual_overrides.get(alias) or "").strip().upper()
+                raw_override = manual_overrides.get(alias)
+                manual_signal = (
+                    str(raw_override.get("signal") or "").strip().upper()
+                    if isinstance(raw_override, dict)
+                    else str(raw_override or "").strip().upper()
+                )
                 if manual_signal in ("BUY", "SELL", "NEUTRAL"):
                     locked_signals[indicator_key] = manual_signal
                     break
@@ -1194,6 +1252,13 @@ def apply_stream_override_to_analysis(analysis_data: dict, stream_settings: dict
             if isinstance(indicator_data, dict):
                 signal = locked_signals.get(indicator_key) or generated_by_key.get(indicator_key) or forced_signal
                 indicator_data["signal"] = signal
+                for alias in aliases_for_indicator(indicator_key):
+                    raw_override = manual_overrides.get(alias)
+                    if isinstance(raw_override, dict):
+                        manual_value = str(raw_override.get("value") or "").strip()
+                        if manual_value:
+                            indicator_data["value"] = manual_value
+                            break
                 votes[signal] = votes.get(signal, 0) + 1
     else:
         indicator_count = 0
@@ -1304,21 +1369,139 @@ def apply_stream_override_to_analysis(analysis_data: dict, stream_settings: dict
     }
     return ensure_analysis_key_levels(analysis_data, preferred_signal=forced_signal)
 
+
+def get_stream_fallback_price(symbol: str, stream_settings: dict) -> float:
+    try:
+        price = float(stream_settings.get("emulation_price"))
+        if price > 0:
+            return price
+    except (TypeError, ValueError):
+        pass
+
+    key = "".join(ch for ch in str(symbol or "").upper() if ch.isalnum())
+    defaults = {
+        "AUDUSD": 0.65,
+        "SP500": 5500.0,
+        "SPX": 5500.0,
+        "US500": 5500.0,
+        "DAX": 18000.0,
+        "GER40": 18000.0,
+        "NIKKEI": 39000.0,
+        "NIKKEI225": 39000.0,
+        "NI225": 39000.0,
+    }
+    return defaults.get(key, 100.0)
+
+
+def build_stream_local_analysis(
+    symbol: str,
+    interval: str,
+    allowed_indicators: List[Any],
+    stream_settings: dict,
+    analysis_type: str = "forex",
+    market_kind: str = "",
+) -> dict:
+    price = get_stream_fallback_price(symbol, stream_settings)
+    indicator_keys: List[str] = []
+    for item in allowed_indicators if isinstance(allowed_indicators, list) else []:
+        if isinstance(item, dict):
+            key = str(item.get("key") or item.get("name") or "").strip()
+        else:
+            key = str(item or "").strip()
+        if key and key not in indicator_keys:
+            indicator_keys.append(key)
+    if not indicator_keys:
+        indicator_keys = ["RSI", "MACD", "EMA50", "EMA200", "ADX", "DMI", "ATR", "ICHIMOKU"]
+
+    def indicator_value(key: str):
+        normalized = str(key or "").upper().replace(" ", "").replace("-", "").replace("_", "")
+        direction = str(stream_settings.get("forced_signal") or "BUY").upper()
+        bullish = direction != "SELL"
+        price_step = max(abs(price) * 0.0015, 0.0001)
+
+        def fmt(value: float, digits: int = 3) -> str:
+            return f"{float(value):.{digits}f}"
+
+        if normalized == "RSI":
+            return 52.0
+        if normalized == "MACD":
+            return 0.0
+        if normalized in ("ATR",):
+            return round(max(abs(price) * 0.002, 0.0001), 5)
+        if normalized in ("EMA921", "EMA9", "EMA21"):
+            return {"e9": round(price * 1.0003, 5), "e21": round(price * 0.9997, 5)}
+        if normalized.startswith("EMA"):
+            return round(price, 5)
+        if normalized == "ADX":
+            return 24.0
+        if normalized in ("PSAR", "PARABOLICSAR"):
+            return round(price - price_step if bullish else price + price_step, 5)
+        if normalized in ("PIVOTPOINTS", "PIVOTPOINTSHL", "PIVOTPOINT"):
+            return f"P {fmt(price)}"
+        if normalized == "SUPERTREND":
+            return fmt(price - price_step * 1.8 if bullish else price + price_step * 1.8)
+        if normalized == "OBV":
+            return "1.24M" if bullish else "-1.24M"
+        if normalized == "DMI":
+            return "+DI 26 / -DI 18" if bullish else "+DI 18 / -DI 26"
+        if normalized == "ICHIMOKU":
+            return "Above cloud" if bullish else "Below cloud"
+        if normalized in ("STOCH", "STOCHASTIC"):
+            return 58.0 if bullish else 42.0
+        if normalized in ("BB", "BOLLINGERBANDS", "BOLLINGERBAND"):
+            return "Mid band"
+        if normalized == "CCI":
+            return 74.0 if bullish else -74.0
+        if normalized == "FIBONACCI":
+            return "61.8%"
+        return "Neutral"
+
+    indicators = {
+        key: {"value": indicator_value(key), "signal": "NEUTRAL"}
+        for key in indicator_keys
+    }
+    step = max(abs(price) * 0.005, 0.0005)
+    analysis_data = {
+        "symbol": str(symbol or "").strip(),
+        "interval": interval,
+        "analysis_type": analysis_type,
+        "market_kind": market_kind,
+        "price": float(price),
+        "entry_price": float(price),
+        "recommendation": "NEUTRAL",
+        "signal": "NEUTRAL",
+        "confidence": 60,
+        "indicators": indicators,
+        "votes": {"BUY": 0, "SELL": 0, "NEUTRAL": len(indicators) or 1},
+        "weighted_scores": {"buy": 0.0, "sell": 0.0, "neutral": float(len(indicators) or 1)},
+        "key_levels": {
+            "current_price": round(price, 5),
+            "nearest_support": round(price - step, 5),
+            "nearest_resistance": round(price + step, 5),
+        },
+        "source": "admin_stream_local",
+        "fetched_at": datetime.utcnow().isoformat() + "Z",
+    }
+    return apply_stream_override_to_analysis(analysis_data, stream_settings)
+
 async def get_support_links_row():
     fallback = {
         "channel_url": (os.getenv("CHANNEL_URL") or "").strip(),
         "support_url": (os.getenv("SUPPORT_URL") or "").strip(),
         "channel_id": (os.getenv("CHANNEL_ID") or "").strip(),
         "check_subscription_enabled": (os.getenv("CHECK_SUBSCRIPTION_ENABLED") or "").strip(),
+        "quiz_config": {},
     }
     if not db_pool:
-        return normalize_channel_settings(fallback)
+        settings = normalize_channel_settings(fallback)
+        settings["quiz_config"] = normalize_quiz_config()
+        return settings
     try:
         async with db_pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(
                     """
-                    SELECT channel_id, channel_url, support_url, check_subscription_enabled
+                    SELECT channel_id, channel_url, support_url, check_subscription_enabled, quiz_config
                     FROM admin_support_links
                     WHERE id = 1
                     LIMIT 1
@@ -1327,9 +1510,13 @@ async def get_support_links_row():
                 row = await cur.fetchone()
     except Exception as e:
         print(f"Support links fallback: {e}")
-        return normalize_channel_settings(fallback)
+        settings = normalize_channel_settings(fallback)
+        settings["quiz_config"] = normalize_quiz_config()
+        return settings
     if not row:
-        return normalize_channel_settings(fallback)
+        settings = normalize_channel_settings(fallback)
+        settings["quiz_config"] = normalize_quiz_config()
+        return settings
     merged = {
         "channel_id": row.get("channel_id") or fallback["channel_id"],
         "channel_url": row.get("channel_url") or fallback["channel_url"],
@@ -1337,8 +1524,16 @@ async def get_support_links_row():
         "check_subscription_enabled": row.get("check_subscription_enabled")
         if row.get("check_subscription_enabled") is not None
         else fallback["check_subscription_enabled"],
+        "quiz_config": row.get("quiz_config") or fallback["quiz_config"],
     }
-    return normalize_channel_settings(merged)
+    settings = normalize_channel_settings(merged)
+    settings["quiz_config"] = normalize_quiz_config(merged.get("quiz_config"))
+    return settings
+
+
+async def get_quiz_config_row():
+    settings = await get_support_links_row()
+    return normalize_quiz_config(settings.get("quiz_config"))
 
 
 async def get_pocket_api_settings_row(include_token: bool = False):
@@ -2331,13 +2526,23 @@ async def admin_settings_update(request: Request, admin=Depends(get_admin_user))
                 raw_indicator_overrides = streams_data.get("indicator_overrides")
                 indicator_overrides = {}
                 if isinstance(raw_indicator_overrides, dict):
-                    for raw_key, raw_signal in raw_indicator_overrides.items():
+                    for raw_key, raw_entry in raw_indicator_overrides.items():
                         key_norm = str(raw_key or "").strip().upper().replace(" ", "").replace("_", "").replace("-", "")
                         if not key_norm:
                             continue
-                        signal = str(raw_signal or "").strip().upper()
+                        if isinstance(raw_entry, dict):
+                            signal = str(raw_entry.get("signal") or "AUTO").strip().upper()
+                            value = str(raw_entry.get("value") or "").strip()
+                        else:
+                            signal = str(raw_entry or "").strip().upper()
+                            value = ""
+                        entry = {}
                         if signal in ("BUY", "SELL", "NEUTRAL"):
-                            indicator_overrides[key_norm] = signal
+                            entry["signal"] = signal
+                        if value:
+                            entry["value"] = value[:64]
+                        if entry:
+                            indicator_overrides[key_norm] = entry
                 if scope != "strategy" or indicator_mode != "manual":
                     indicator_overrides = {}
                 indicator_overrides_json = json.dumps(indicator_overrides, ensure_ascii=False)
@@ -2409,20 +2614,30 @@ async def admin_settings_update(request: Request, admin=Depends(get_admin_user))
                 channel_url = str(support_data.get("channel_url") or "").strip()[:1000]
                 support_url = str(support_data.get("support_url") or "").strip()[:1000]
                 check_subscription_enabled = 1 if bool(support_data.get("check_subscription_enabled")) else 0
+                quiz_config = normalize_quiz_config(support_data.get("quiz_config"))
+                quiz_config_json = json.dumps(quiz_config, ensure_ascii=False)
                 await cur.execute(
                     """
                     INSERT INTO admin_support_links (
-                        id, channel_id, channel_url, support_url, check_subscription_enabled, updated_by
+                        id, channel_id, channel_url, support_url, check_subscription_enabled, quiz_config, updated_by
                     )
-                    VALUES (1, %s, %s, %s, %s, %s)
+                    VALUES (1, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         channel_id = VALUES(channel_id),
                         channel_url = VALUES(channel_url),
                         support_url = VALUES(support_url),
                         check_subscription_enabled = VALUES(check_subscription_enabled),
+                        quiz_config = VALUES(quiz_config),
                         updated_by = VALUES(updated_by)
                     """,
-                    (channel_id, channel_url, support_url, check_subscription_enabled, int(admin["user_id"])),
+                    (
+                        channel_id,
+                        channel_url,
+                        support_url,
+                        check_subscription_enabled,
+                        quiz_config_json,
+                        int(admin["user_id"]),
+                    ),
                 )
             if isinstance(pocket_data, dict) and pocket_data:
                 partner_id = str(pocket_data.get("partner_id") or "").strip()[:64]
@@ -3908,6 +4123,8 @@ async def fetch_binary_expiration_options() -> List[Dict[str, str]]:
 async def get_market_options_payload(kind: str, min_payout: int) -> Dict[str, Any]:
     market_kind = normalize_market_kind(kind)
     pairs = await fetch_devsbite_market_pairs(market_kind, min_payout)
+    if market_kind == "forex":
+        pairs = merge_custom_market_assets(pairs, get_custom_forex_currency_assets())
     expirations = await fetch_binary_expiration_options()
     return {
         "kind": market_kind,
@@ -4000,10 +4217,11 @@ async def get_indices_pairs(user=Depends(get_telegram_user)):
         try:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
-            return response.json()
+            pairs = normalize_forex_stream_assets("indices", response.json())
+            return merge_custom_market_assets(pairs, get_custom_forex_index_assets())
         except Exception as e:
             print(f"Indices API Error: {e}")
-            return []
+            return get_custom_forex_index_assets()
 
 @app.get("/api/analysis/active")
 async def get_active_analyses(user=Depends(get_telegram_user)):
@@ -4167,7 +4385,22 @@ async def create_binary_analysis(request: Request, user=Depends(get_telegram_use
         "exchange": data.get("exchange"),
     }
 
-    if market_kind == "forex":
+    stream_override = await resolve_stream_override(
+        strategy_id_int,
+        analysis_type="binary",
+        requested_symbol=pair,
+        requested_market=market_kind,
+    )
+    if stream_override:
+        analysis_data = build_stream_local_analysis(
+            pair,
+            analysis_interval,
+            allowed_indicators,
+            stream_override,
+            analysis_type="binary",
+            market_kind=market_kind,
+        )
+    elif market_kind == "forex":
         async with httpx.AsyncClient() as client:
             try:
                 resp = await client.post(url, headers=headers, json=payload, timeout=20.0)
@@ -4289,14 +4522,6 @@ async def create_binary_analysis(request: Request, user=Depends(get_telegram_use
             return {"error": str(e)}
 
     analysis_data = ensure_analysis_key_levels(analysis_data, preferred_signal=analysis_data.get("recommendation"))
-    stream_override = await resolve_stream_override(
-        strategy_id_int,
-        analysis_type="binary",
-        requested_symbol=pair,
-        requested_market=market_kind,
-    )
-    if stream_override:
-        analysis_data = apply_stream_override_to_analysis(analysis_data, stream_override)
     analysis_data = ensure_analysis_key_levels(analysis_data, preferred_signal=analysis_data.get("recommendation"))
     analysis_data = enforce_binary_signal(analysis_data)
     recommendation = str(analysis_data.get("recommendation") or analysis_data.get("signal") or "").strip().upper()
@@ -4458,80 +4683,90 @@ async def create_forex_analysis(request: Request, user=Depends(get_telegram_user
         "exchange": exchange,
     }
 
-    async with httpx.AsyncClient() as client:
-        try:
-            upstream_data = None
-            baseline_analysis_data = None
-            gateway_error_text = ""
+    stream_override = await resolve_stream_override(
+        strategy_id_int,
+        analysis_type="forex",
+        requested_symbol=pair,
+    )
+    if stream_override:
+        analysis_data = build_stream_local_analysis(
+            str(pair or "").strip(),
+            interval,
+            allowed_indicators,
+            stream_override,
+            analysis_type="forex",
+            market_kind=normalize_forex_stream_market(stream_override.get("emulation_market") or ""),
+        )
+        analysis_pair = str(pair).strip() or pair
+        analysis_data["symbol"] = analysis_pair
+        news_data = await fetch_news_data()
+    else:
+        async with httpx.AsyncClient() as client:
             try:
-                resp = await client.post(url, headers=headers, json=payload, timeout=20.0)
-                resp.raise_for_status()
-                upstream_data = resp.json()
-                baseline_analysis_data = compute_analysis_decision(
-                    upstream_data,
-                    symbol=formatted_pair,
-                    interval=interval,
-                    allowed_indicators=allowed_indicators,
+                upstream_data = None
+                baseline_analysis_data = None
+                gateway_error_text = ""
+                try:
+                    resp = await client.post(url, headers=headers, json=payload, timeout=20.0)
+                    resp.raise_for_status()
+                    upstream_data = resp.json()
+                    baseline_analysis_data = compute_analysis_decision(
+                        upstream_data,
+                        symbol=formatted_pair,
+                        interval=interval,
+                        allowed_indicators=allowed_indicators,
+                    )
+                except httpx.HTTPStatusError as e:
+                    gateway_error_text = e.response.text
+                    print(f"ANALYSIS GATEWAY ERROR [{e.response.status_code}]: {gateway_error_text} (Payload: {payload})")
+
+                fallback_needed = (
+                    has_explicit_twelvedata_mapping(pair)
+                    or upstream_data is None
+                    or not isinstance(baseline_analysis_data, dict)
+                    or not isinstance(baseline_analysis_data.get("indicators"), dict)
+                    or len(baseline_analysis_data.get("indicators") or {}) == 0
                 )
-            except httpx.HTTPStatusError as e:
-                gateway_error_text = e.response.text
-                print(f"ANALYSIS GATEWAY ERROR [{e.response.status_code}]: {gateway_error_text} (Payload: {payload})")
+                if fallback_needed:
+                    fallback = await build_twelvedata_based_analysis(pair, interval, allowed_indicators)
+                    if fallback:
+                        upstream_data, baseline_analysis_data = fallback
+                        formatted_pair = str(pair or "").strip()
+                    elif upstream_data is None:
+                        return {"error": f"API Error: {gateway_error_text or 'Price not found'}"}
 
-            fallback_needed = (
-                has_explicit_twelvedata_mapping(pair)
-                or upstream_data is None
-                or not isinstance(baseline_analysis_data, dict)
-                or not isinstance(baseline_analysis_data.get("indicators"), dict)
-                or len(baseline_analysis_data.get("indicators") or {}) == 0
-            )
-            if fallback_needed:
-                fallback = await build_twelvedata_based_analysis(pair, interval, allowed_indicators)
-                if fallback:
-                    upstream_data, baseline_analysis_data = fallback
-                    formatted_pair = str(pair or "").strip()
-                elif upstream_data is None:
-                    return {"error": f"API Error: {gateway_error_text or 'Price not found'}"}
-
-            analysis_settings = await get_admin_analysis_settings()
-            if analysis_settings.get("engine") == "gpt":
-                if not analysis_settings.get("gpt_api_key"):
-                    print("GPT analysis is not configured; using baseline analysis")
-                    analysis_data = fallback_to_baseline_analysis(baseline_analysis_data)
-                else:
-                    strategy_context = await get_strategy_context(strategy_id_int)
-                    try:
-                        analysis_data = await analysis_ai_service.generate_gpt_analysis(
-                            api_key=analysis_settings.get("gpt_api_key") or "",
-                            model=analysis_settings.get("gpt_model") or analysis_ai_service.DEFAULT_ANALYSIS_GPT_MODEL,
-                            prompt=analysis_settings.get("gpt_prompt") or analysis_ai_service.DEFAULT_ANALYSIS_GPT_PROMPT,
-                            raw_payload=upstream_data,
-                            symbol=formatted_pair,
-                            interval=interval,
-                            allowed_indicators=allowed_indicators,
-                            strategy=strategy_context,
-                            baseline_analysis=baseline_analysis_data,
-                        )
-                    except Exception as e:
-                        print(f"GPT analysis error: {e}; using baseline analysis")
+                analysis_settings = await get_admin_analysis_settings()
+                if analysis_settings.get("engine") == "gpt":
+                    if not analysis_settings.get("gpt_api_key"):
+                        print("GPT analysis is not configured; using baseline analysis")
                         analysis_data = fallback_to_baseline_analysis(baseline_analysis_data)
-            else:
-                analysis_data = fallback_to_baseline_analysis(baseline_analysis_data)
-            analysis_data = ensure_analysis_key_levels(analysis_data, preferred_signal=analysis_data.get("recommendation"))
-            stream_override = await resolve_stream_override(
-                strategy_id_int,
-                analysis_type="forex",
-                requested_symbol=formatted_pair or pair,
-            )
-            if stream_override:
-                analysis_data = apply_stream_override_to_analysis(analysis_data, stream_override)
-            analysis_data = ensure_analysis_key_levels(analysis_data, preferred_signal=analysis_data.get("recommendation"))
-            analysis_pair = str(pair).strip() or pair
-            analysis_data["symbol"] = analysis_pair
-            news_data = await fetch_news_data()
-        except ValueError as e:
-            return {"error": f"Analysis parse error: {str(e)}"}
-        except Exception as e:
-            return {"error": str(e)}
+                    else:
+                        strategy_context = await get_strategy_context(strategy_id_int)
+                        try:
+                            analysis_data = await analysis_ai_service.generate_gpt_analysis(
+                                api_key=analysis_settings.get("gpt_api_key") or "",
+                                model=analysis_settings.get("gpt_model") or analysis_ai_service.DEFAULT_ANALYSIS_GPT_MODEL,
+                                prompt=analysis_settings.get("gpt_prompt") or analysis_ai_service.DEFAULT_ANALYSIS_GPT_PROMPT,
+                                raw_payload=upstream_data,
+                                symbol=formatted_pair,
+                                interval=interval,
+                                allowed_indicators=allowed_indicators,
+                                strategy=strategy_context,
+                                baseline_analysis=baseline_analysis_data,
+                            )
+                        except Exception as e:
+                            print(f"GPT analysis error: {e}; using baseline analysis")
+                            analysis_data = fallback_to_baseline_analysis(baseline_analysis_data)
+                else:
+                    analysis_data = fallback_to_baseline_analysis(baseline_analysis_data)
+                analysis_data = ensure_analysis_key_levels(analysis_data, preferred_signal=analysis_data.get("recommendation"))
+                analysis_pair = str(pair).strip() or pair
+                analysis_data["symbol"] = analysis_pair
+                news_data = await fetch_news_data()
+            except ValueError as e:
+                return {"error": f"Analysis parse error: {str(e)}"}
+            except Exception as e:
+                return {"error": str(e)}
 
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -4677,6 +4912,7 @@ async def ensure_onboarding_row(user_id: int) -> Dict[str, Any]:
 
 async def send_quiz_question(chat_id: int, step: str):
     normalized_step = normalize_quiz_step(step)
+    quiz_config = await get_quiz_config_row()
     keyboard_rows = [
         [
             InlineKeyboardButton(
@@ -4684,11 +4920,11 @@ async def send_quiz_question(chat_id: int, step: str):
                 callback_data=f"{QUIZ_ANSWER_CALLBACK_PREFIX}:{normalized_step}:{index}",
             )
         ]
-        for index, option in enumerate(get_quiz_options(normalized_step))
+        for index, option in enumerate(get_quiz_options(normalized_step, quiz_config))
     ]
     await bot.send_message(
         chat_id=chat_id,
-        text=get_quiz_question(normalized_step),
+        text=get_quiz_question(normalized_step, quiz_config),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_rows),
     )
 
@@ -4708,15 +4944,8 @@ async def send_channel_gate(chat_id: int):
     settings = await get_support_links_row()
     keyboard_rows = [
         [InlineKeyboardButton(text="Open channel", url=settings["channel_url"])],
+        [InlineKeyboardButton(text="Go to trading", callback_data=FUNNEL_CONTINUE_CALLBACK)],
     ]
-    if settings["check_subscription_enabled"]:
-        keyboard_rows.append(
-            [InlineKeyboardButton(text="Check subscription", callback_data=FUNNEL_CHECK_CHANNEL_CALLBACK)]
-        )
-    else:
-        keyboard_rows.append(
-            [InlineKeyboardButton(text="Go to trading", callback_data=FUNNEL_CONTINUE_CALLBACK)]
-        )
     await bot.send_message(
         chat_id=chat_id,
         text=f"Here is the channel link:\n{settings['channel_url']}",
@@ -4730,14 +4959,15 @@ async def map_quiz_answer_with_ai(step: str, text: str) -> Optional[str]:
         return local_answer
 
     normalized_step = normalize_quiz_step(step)
-    options = list(get_quiz_options(normalized_step))
+    quiz_config = await get_quiz_config_row()
+    options = list(get_quiz_options(normalized_step, quiz_config))
     result = await ai_service.call_openai(
         [
             {"role": "system", "content": QUALIFICATION_GPT_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
-                    f"Question: {get_quiz_question(normalized_step)}\n"
+                    f"Question: {get_quiz_question(normalized_step, quiz_config)}\n"
                     f"Allowed options: {json.dumps(options, ensure_ascii=False)}\n"
                     f"User answer: {text}"
                 ),
@@ -4932,7 +5162,8 @@ async def handle_quiz_answer_callback(callback: types.CallbackQuery):
         return
     current_step = normalize_quiz_step(raw_step)
     try:
-        option = get_quiz_options(current_step)[int(raw_index)]
+        quiz_config = await get_quiz_config_row()
+        option = get_quiz_options(current_step, quiz_config)[int(raw_index)]
     except (ValueError, IndexError):
         await callback.answer("Please try again.", show_alert=True)
         return
@@ -4980,42 +5211,7 @@ async def handle_funnel_continue(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda callback: callback.data == FUNNEL_CHECK_CHANNEL_CALLBACK)
 async def handle_funnel_check_channel(callback: types.CallbackQuery):
-    if not callback.message or not callback.from_user:
-        return
-    user_id = int(callback.from_user.id)
-    settings = await get_support_links_row()
-    try:
-        member = await bot.get_chat_member(chat_id=settings["channel_id"], user_id=user_id)
-        is_subscribed = is_active_channel_member(getattr(member, "status", None))
-    except Exception as e:
-        print(f"[Funnel] Channel subscription check failed: {e}")
-        await callback.answer(
-            "We couldn't check your subscription. Please try again in a minute.",
-            show_alert=True,
-        )
-        return
-
-    if not is_subscribed:
-        await callback.answer("Subscription was not found yet.", show_alert=True)
-        return
-
-    if db_pool:
-        async with db_pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
-                    UPDATE user_onboarding
-                    SET channel_subscribed_at = COALESCE(channel_subscribed_at, NOW()),
-                        channel_gate_completed_at = COALESCE(channel_gate_completed_at, NOW())
-                    WHERE user_id = %s
-                    """,
-                    (user_id,),
-                )
-
-    asyncio.create_task(send_aio_postback_event(user_id, CHANNEL_SUBSCRIBE_EVENT))
-    user_name = callback.from_user.first_name or callback.from_user.username or "Trader"
-    await callback.answer("Subscription confirmed.")
-    await send_main_menu(callback.message.chat.id, user_id, user_name)
+    await handle_funnel_continue(callback)
 
 class AIChatRequest(BaseModel):
     user_id: Optional[int] = None
