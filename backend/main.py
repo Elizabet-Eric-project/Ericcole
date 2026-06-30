@@ -82,6 +82,7 @@ try:
         CHATTERFY_START_EVENT,
         QUIZ_COMPLETE_EVENT,
         get_next_quiz_step,
+        get_quiz_steps_to_complete,
         get_aio_question_field,
         get_quiz_options,
         get_quiz_question,
@@ -101,6 +102,7 @@ except ModuleNotFoundError:
         CHATTERFY_START_EVENT,
         QUIZ_COMPLETE_EVENT,
         get_next_quiz_step,
+        get_quiz_steps_to_complete,
         get_aio_question_field,
         get_quiz_options,
         get_quiz_question,
@@ -4998,6 +5000,7 @@ async def save_quiz_answer(user_id: int, step: str, answer: str, skip_flow: bool
         "capital": "quiz_capital",
     }
     field_name = field_map[normalized_step]
+    completed_steps = get_quiz_steps_to_complete(normalized_step, skip_flow)
 
     async with db_pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -5014,33 +5017,40 @@ async def save_quiz_answer(user_id: int, step: str, answer: str, skip_flow: bool
                     (normalized_answer, next_step, user_id, normalized_step),
                 )
             else:
+                assignments = [f"{field_map[item]} = %s" for item in completed_steps]
+                values = [
+                    normalized_answer if item == normalized_step else "Skip"
+                    for item in completed_steps
+                ]
                 await cur.execute(
                     f"""
                     UPDATE user_onboarding
-                    SET {field_name} = %s,
+                    SET {', '.join(assignments)},
                         current_step = %s,
                         quiz_completed_at = COALESCE(quiz_completed_at, NOW())
                     WHERE user_id = %s
                       AND current_step = %s
                       AND quiz_completed_at IS NULL
                     """,
-                    (normalized_answer, "skipped" if skip_flow else "completed", user_id, normalized_step),
+                    (*values, "skipped" if skip_flow else "completed", user_id, normalized_step),
                 )
             saved = cur.rowcount > 0
 
     if not saved:
         return None, False
-    asyncio.create_task(send_aio_field_value(user_id, get_aio_question_field(normalized_step), normalized_answer))
+    for item in completed_steps:
+        value = normalized_answer if item == normalized_step else "Skip"
+        asyncio.create_task(send_aio_field_value(user_id, get_aio_question_field(item), value))
     return next_step, True
 
 
 async def finish_quiz_and_show_channel(message: types.Message, user_id: int, skipped: bool = False):
+    asyncio.create_task(send_aio_postback_event(user_id, QUIZ_COMPLETE_EVENT))
     if skipped:
         await message.answer("No problem.")
         await send_channel_gate(message.chat.id)
         return
 
-    asyncio.create_task(send_aio_postback_event(user_id, QUIZ_COMPLETE_EVENT))
     await message.answer(
         "Thank you, I've saved your answers.\n\n"
         "Later, if you want help with a more suitable broker setup for your capital and experience, "

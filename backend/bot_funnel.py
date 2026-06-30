@@ -143,6 +143,14 @@ def get_next_quiz_step(step: Optional[str]) -> Optional[str]:
     return QUIZ_STEPS[index + 1]
 
 
+def get_quiz_steps_to_complete(step: Optional[str], skip_flow: bool = False) -> tuple[str, ...]:
+    normalized_step = normalize_quiz_step(step)
+    if not skip_flow:
+        return (normalized_step,)
+    index = QUIZ_STEPS.index(normalized_step)
+    return QUIZ_STEPS[index:]
+
+
 def is_skip_answer(value: Any) -> bool:
     normalized = str(value or "").strip().lower()
     if not normalized:

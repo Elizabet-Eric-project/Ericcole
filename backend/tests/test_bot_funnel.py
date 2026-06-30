@@ -7,6 +7,7 @@ from bot_funnel import (
     DEFAULT_CHANNEL_URL,
     QUIZ_COMPLETE_EVENT,
     get_aio_question_field,
+    get_quiz_steps_to_complete,
     get_quiz_options,
     get_quiz_question,
     is_skip_answer,
@@ -77,6 +78,18 @@ class BotFunnelTest(unittest.TestCase):
         self.assertEqual(get_aio_question_field("experience"), "tg_question1")
         self.assertEqual(get_aio_question_field("broker_experience"), "tg_question2")
         self.assertEqual(get_aio_question_field("capital"), "tg_question3")
+
+    def test_skip_completes_current_and_remaining_quiz_steps(self):
+        self.assertEqual(
+            get_quiz_steps_to_complete("experience", skip_flow=True),
+            ("experience", "broker_experience", "capital"),
+        )
+        self.assertEqual(
+            get_quiz_steps_to_complete("broker_experience", skip_flow=True),
+            ("broker_experience", "capital"),
+        )
+        self.assertEqual(get_quiz_steps_to_complete("capital", skip_flow=True), ("capital",))
+        self.assertEqual(get_quiz_steps_to_complete("experience", skip_flow=False), ("experience",))
 
     def test_detects_valid_quiz_steps(self):
         self.assertTrue(is_valid_quiz_step("experience"))
