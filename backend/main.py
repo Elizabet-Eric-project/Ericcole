@@ -629,10 +629,10 @@ async def insert_pocket_postback_log(
             await cur.execute(
                 """
                 INSERT INTO pocket_postback_events (
-                    event_slug, unique_key, user_id, click_id, trader_id, site_id, cid, sub_id1,
+                    event_slug, unique_key, user_id, click_id, trader_id, site_id, cid, sub_id1, sub_id2,
                     raw_payload, status, reason, source_ip
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     normalized.get("event_slug") or "unknown",
@@ -643,6 +643,7 @@ async def insert_pocket_postback_log(
                     normalized.get("site_id") or None,
                     normalized.get("cid") or None,
                     normalized.get("sub_id1") or None,
+                    normalized.get("sub_id2") or None,
                     json.dumps(raw_payload, ensure_ascii=False, default=str),
                     status,
                     reason,
@@ -675,6 +676,7 @@ async def pocket_postback(request: Request):
     site_id = normalized.get("site_id") or ""
     cid = normalized.get("cid") or ""
     sub_id1 = normalized.get("sub_id1") or ""
+    sub_id2 = normalized.get("sub_id2") or ""
 
     if event_slug != POCKET_REGISTRATION_EVENT:
         log_id = await insert_pocket_postback_log(
@@ -698,6 +700,7 @@ async def pocket_postback(request: Request):
                     pocket_site_id = CASE WHEN %s <> '' THEN %s ELSE pocket_site_id END,
                     pocket_cid = CASE WHEN %s <> '' THEN %s ELSE pocket_cid END,
                     pocket_sub_id1 = CASE WHEN %s <> '' THEN %s ELSE pocket_sub_id1 END,
+                    pocket_sub_id2 = CASE WHEN %s <> '' THEN %s ELSE pocket_sub_id2 END,
                     pocket_registered = 1,
                     pocket_registered_at = COALESCE(pocket_registered_at, DATE_FORMAT(NOW(), '%%Y-%%m-%%dT%%H:%%i:%%sZ')),
                     pocket_checked_at = NOW()
@@ -714,6 +717,8 @@ async def pocket_postback(request: Request):
                     cid,
                     sub_id1,
                     sub_id1,
+                    sub_id2,
+                    sub_id2,
                     telegram_id,
                 ),
             )
@@ -734,6 +739,7 @@ async def pocket_postback(request: Request):
         "site_id": site_id or None,
         "cid": cid or None,
         "sub_id1": sub_id1 or None,
+        "sub_id2": sub_id2 or None,
     }
 
 
@@ -1933,7 +1939,7 @@ async def fetch_admin_user_row(cur, user_id: int) -> Optional[Dict[str, Any]]:
         """
         SELECT u.user_id, u.username, u.first_name, u.mode, u.lang, u.strategy_id,
                u.trader_id, COALESCE(u.balance, 0) AS balance,
-               u.pocket_click_id, u.pocket_site_id, u.pocket_cid, u.pocket_sub_id1,
+               u.pocket_click_id, u.pocket_site_id, u.pocket_cid, u.pocket_sub_id1, u.pocket_sub_id2,
                COALESCE(u.balance_sync_enabled, 0) AS balance_sync_enabled,
                u.balance_synced_at, u.balance_sync_error,
                COALESCE(u.pocket_registered, 0) AS pocket_registered,
@@ -2143,7 +2149,7 @@ async def admin_users(limit: int = 50, offset: int = 0, search: str = "", admin=
                     """
                     SELECT u.user_id, u.username, u.first_name, u.mode, u.lang, u.strategy_id,
                            u.trader_id, COALESCE(u.balance, 0) AS balance,
-                           u.pocket_click_id, u.pocket_site_id, u.pocket_cid, u.pocket_sub_id1,
+                           u.pocket_click_id, u.pocket_site_id, u.pocket_cid, u.pocket_sub_id1, u.pocket_sub_id2,
                            COALESCE(u.balance_sync_enabled, 0) AS balance_sync_enabled,
                            u.balance_synced_at, u.balance_sync_error,
                            COALESCE(u.pocket_registered, 0) AS pocket_registered,
@@ -2173,7 +2179,7 @@ async def admin_users(limit: int = 50, offset: int = 0, search: str = "", admin=
                     """
                     SELECT u.user_id, u.username, u.first_name, u.mode, u.lang, u.strategy_id,
                            NULL AS trader_id, 0 AS balance,
-                           NULL AS pocket_click_id, NULL AS pocket_site_id, NULL AS pocket_cid, NULL AS pocket_sub_id1,
+                           NULL AS pocket_click_id, NULL AS pocket_site_id, NULL AS pocket_cid, NULL AS pocket_sub_id1, NULL AS pocket_sub_id2,
                            0 AS balance_sync_enabled, NULL AS balance_synced_at, NULL AS balance_sync_error,
                            0 AS pocket_registered, 0 AS pocket_deposited, NULL AS pocket_registered_at,
                            0 AS pocket_deposit_amount, NULL AS pocket_checked_at,
@@ -3912,7 +3918,7 @@ async def get_profile(user=Depends(get_telegram_user)):
             await cur.execute("""
                 SELECT u.user_id, u.lang, u.mode, u.username, u.first_name, u.avatar_url,
                        u.strategy_id, u.trader_id, COALESCE(u.balance, 0) AS balance,
-                       u.pocket_click_id, u.pocket_site_id, u.pocket_cid, u.pocket_sub_id1,
+                       u.pocket_click_id, u.pocket_site_id, u.pocket_cid, u.pocket_sub_id1, u.pocket_sub_id2,
                        COALESCE(u.balance_sync_enabled, 0) AS balance_sync_enabled,
                        u.balance_synced_at,
                        COALESCE(u.pocket_registered, 0) AS pocket_registered,

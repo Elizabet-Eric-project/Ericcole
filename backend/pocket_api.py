@@ -72,8 +72,9 @@ def normalize_pocket_postback_payload(payload: Dict[str, Any]) -> Dict[str, Any]
     site_id = _normalize_pocket_text(_first_payload_value(payload, "site_id", "siteid"), 128)
     cid = _normalize_pocket_text(_first_payload_value(payload, "cid", "campaign_id"), 128)
     sub_id1 = _normalize_pocket_text(_first_payload_value(payload, "sub_id1", "subid1", "sub_id"), 255)
+    sub_id2 = _normalize_pocket_text(_first_payload_value(payload, "sub_id2", "subid2"), 255)
     telegram_id = normalize_pocket_telegram_id(click_id)
-    unique_source = trader_id or cid or sub_id1 or click_id or "unknown"
+    unique_source = trader_id or cid or sub_id2 or sub_id1 or click_id or "unknown"
     unique_key = _normalize_pocket_text(f"{event_slug or 'unknown'}:{click_id or 'unknown'}:{unique_source}", 191)
 
     return {
@@ -84,5 +85,6 @@ def normalize_pocket_postback_payload(payload: Dict[str, Any]) -> Dict[str, Any]
         "site_id": site_id,
         "cid": cid,
         "sub_id1": sub_id1,
+        "sub_id2": sub_id2,
         "unique_key": unique_key,
     }

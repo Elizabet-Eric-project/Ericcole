@@ -98,6 +98,7 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     pocket_site_id VARCHAR(128) NULL,
                     pocket_cid VARCHAR(128) NULL,
                     pocket_sub_id1 VARCHAR(255) NULL,
+                    pocket_sub_id2 VARCHAR(255) NULL,
                     balance DECIMAL(18,2) NOT NULL DEFAULT 0.00,
                     balance_sync_enabled TINYINT(1) NOT NULL DEFAULT 0,
                     balance_synced_at TIMESTAMP NULL DEFAULT NULL,
@@ -417,6 +418,7 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     site_id VARCHAR(128) NULL,
                     cid VARCHAR(128) NULL,
                     sub_id1 VARCHAR(255) NULL,
+                    sub_id2 VARCHAR(255) NULL,
                     raw_payload LONGTEXT NULL,
                     status VARCHAR(32) NOT NULL DEFAULT 'received',
                     reason VARCHAR(255) NULL,
@@ -433,6 +435,7 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
         await _ensure_column(conn, db_name, "users", "pocket_site_id", "ALTER TABLE users ADD COLUMN pocket_site_id VARCHAR(128) NULL")
         await _ensure_column(conn, db_name, "users", "pocket_cid", "ALTER TABLE users ADD COLUMN pocket_cid VARCHAR(128) NULL")
         await _ensure_column(conn, db_name, "users", "pocket_sub_id1", "ALTER TABLE users ADD COLUMN pocket_sub_id1 VARCHAR(255) NULL")
+        await _ensure_column(conn, db_name, "users", "pocket_sub_id2", "ALTER TABLE users ADD COLUMN pocket_sub_id2 VARCHAR(255) NULL")
         await _ensure_column(conn, db_name, "users", "balance", "ALTER TABLE users ADD COLUMN balance DECIMAL(18,2) NOT NULL DEFAULT 0.00")
         await _ensure_column(conn, db_name, "users", "balance_sync_enabled", "ALTER TABLE users ADD COLUMN balance_sync_enabled TINYINT(1) NOT NULL DEFAULT 0")
         await _ensure_column(conn, db_name, "users", "balance_synced_at", "ALTER TABLE users ADD COLUMN balance_synced_at TIMESTAMP NULL DEFAULT NULL")
@@ -448,6 +451,7 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
         await _ensure_column(conn, db_name, "users", "is_blocked", "ALTER TABLE users ADD COLUMN is_blocked TINYINT(1) NOT NULL DEFAULT 0")
         await _ensure_column(conn, db_name, "users", "blocked_by", "ALTER TABLE users ADD COLUMN blocked_by BIGINT NULL")
         await _ensure_column(conn, db_name, "users", "blocked_at", "ALTER TABLE users ADD COLUMN blocked_at TIMESTAMP NULL DEFAULT NULL")
+        await _ensure_column(conn, db_name, "pocket_postback_events", "sub_id2", "ALTER TABLE pocket_postback_events ADD COLUMN sub_id2 VARCHAR(255) NULL AFTER sub_id1")
         await _ensure_column(conn, db_name, "admin_support_links", "channel_id", "ALTER TABLE admin_support_links ADD COLUMN channel_id BIGINT NULL")
         await _ensure_column(conn, db_name, "admin_support_links", "check_subscription_enabled", "ALTER TABLE admin_support_links ADD COLUMN check_subscription_enabled TINYINT(1) NOT NULL DEFAULT 1")
         await _ensure_column(conn, db_name, "admin_support_links", "quiz_config", "ALTER TABLE admin_support_links ADD COLUMN quiz_config LONGTEXT NULL")

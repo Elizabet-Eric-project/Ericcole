@@ -29,6 +29,7 @@ class PocketApiTest(unittest.TestCase):
                 "trader_id": "900102",
                 "cid": "84664",
                 "sub_id1": "welcome",
+                "sub_id2": "tracker-click-123",
             }
         )
 
@@ -39,6 +40,7 @@ class PocketApiTest(unittest.TestCase):
         self.assertEqual(normalized["site_id"], "42")
         self.assertEqual(normalized["cid"], "84664")
         self.assertEqual(normalized["sub_id1"], "welcome")
+        self.assertEqual(normalized["sub_id2"], "tracker-click-123")
         self.assertEqual(normalized["unique_key"], "registration:7097261848:900102")
 
     def test_rejects_bad_click_id(self):
