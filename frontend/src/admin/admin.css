@@ -530,6 +530,48 @@
   max-width: 760px;
 }
 
+.admin-access-policy-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-access-policy {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  border: 1px solid rgba(151, 109, 44, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 252, 246, 0.76);
+  color: var(--text-main);
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.admin-access-policy.active {
+  border-color: rgba(151, 109, 44, 0.66);
+  background: rgba(151, 109, 44, 0.12);
+}
+
+.admin-access-radio {
+  color: var(--accent);
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.admin-access-policy strong,
+.admin-access-policy small {
+  display: block;
+}
+
+.admin-access-policy small {
+  color: var(--text-soft);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
 .admin-streams-detail {
   max-width: 920px;
 }

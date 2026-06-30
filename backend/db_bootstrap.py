@@ -415,6 +415,7 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     user_id BIGINT NULL,
                     click_id VARCHAR(128) NULL,
                     trader_id VARCHAR(64) NULL,
+                    deposit_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
                     site_id VARCHAR(128) NULL,
                     cid VARCHAR(128) NULL,
                     sub_id1 VARCHAR(255) NULL,
@@ -430,6 +431,18 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     chatterfy_sent_at TIMESTAMP NULL DEFAULT NULL,
                     source_ip VARCHAR(64) NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS admin_system_access_settings (
+                    id TINYINT NOT NULL PRIMARY KEY DEFAULT 1,
+                    policy VARCHAR(32) NOT NULL DEFAULT 'registration_deposit',
+                    min_deposit_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+                    updated_by BIGINT NULL,
                     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
@@ -458,12 +471,17 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
         await _ensure_column(conn, db_name, "users", "blocked_by", "ALTER TABLE users ADD COLUMN blocked_by BIGINT NULL")
         await _ensure_column(conn, db_name, "users", "blocked_at", "ALTER TABLE users ADD COLUMN blocked_at TIMESTAMP NULL DEFAULT NULL")
         await _ensure_column(conn, db_name, "pocket_postback_events", "sub_id2", "ALTER TABLE pocket_postback_events ADD COLUMN sub_id2 VARCHAR(255) NULL AFTER sub_id1")
+        await _ensure_column(conn, db_name, "pocket_postback_events", "deposit_amount", "ALTER TABLE pocket_postback_events ADD COLUMN deposit_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER trader_id")
         await _ensure_column(conn, db_name, "pocket_postback_events", "chatterfy_request_url", "ALTER TABLE pocket_postback_events ADD COLUMN chatterfy_request_url TEXT NULL")
         await _ensure_column(conn, db_name, "pocket_postback_events", "chatterfy_status", "ALTER TABLE pocket_postback_events ADD COLUMN chatterfy_status VARCHAR(32) NULL")
         await _ensure_column(conn, db_name, "pocket_postback_events", "chatterfy_response_status", "ALTER TABLE pocket_postback_events ADD COLUMN chatterfy_response_status INT NULL")
         await _ensure_column(conn, db_name, "pocket_postback_events", "chatterfy_response_body", "ALTER TABLE pocket_postback_events ADD COLUMN chatterfy_response_body LONGTEXT NULL")
         await _ensure_column(conn, db_name, "pocket_postback_events", "chatterfy_error", "ALTER TABLE pocket_postback_events ADD COLUMN chatterfy_error TEXT NULL")
         await _ensure_column(conn, db_name, "pocket_postback_events", "chatterfy_sent_at", "ALTER TABLE pocket_postback_events ADD COLUMN chatterfy_sent_at TIMESTAMP NULL DEFAULT NULL")
+        await _ensure_column(conn, db_name, "admin_system_access_settings", "policy", "ALTER TABLE admin_system_access_settings ADD COLUMN policy VARCHAR(32) NOT NULL DEFAULT 'registration_deposit'")
+        await _ensure_column(conn, db_name, "admin_system_access_settings", "min_deposit_amount", "ALTER TABLE admin_system_access_settings ADD COLUMN min_deposit_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00")
+        await _ensure_column(conn, db_name, "admin_system_access_settings", "updated_by", "ALTER TABLE admin_system_access_settings ADD COLUMN updated_by BIGINT NULL")
+        await _ensure_column(conn, db_name, "admin_system_access_settings", "updated_at", "ALTER TABLE admin_system_access_settings ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP")
         await _ensure_column(conn, db_name, "admin_support_links", "channel_id", "ALTER TABLE admin_support_links ADD COLUMN channel_id BIGINT NULL")
         await _ensure_column(conn, db_name, "admin_support_links", "check_subscription_enabled", "ALTER TABLE admin_support_links ADD COLUMN check_subscription_enabled TINYINT(1) NOT NULL DEFAULT 1")
         await _ensure_column(conn, db_name, "admin_support_links", "quiz_config", "ALTER TABLE admin_support_links ADD COLUMN quiz_config LONGTEXT NULL")

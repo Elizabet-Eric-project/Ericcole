@@ -1,9 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiAdminFetchJson } from '../../lib/api';
 
-const ACCESS_STORAGE_KEY = 'admin_system_access_enabled';
 const STREAM_SIGNALS = ['BUY', 'SELL'];
 const INDICATOR_SIGNAL_OPTIONS = ['AUTO', 'BUY', 'SELL', 'NEUTRAL'];
+const ACCESS_POLICIES = [
+  {
+    key: 'registration',
+    title: 'После регистрации',
+    description: 'Сигналы откроются после Pocket registration postback.',
+  },
+  {
+    key: 'registration_deposit',
+    title: 'После регистрации и депозита',
+    description: 'Считаем общую сумму FTD и повторных депозитов.',
+  },
+  {
+    key: 'all',
+    title: 'Доступ к сигналам открыт всем',
+    description: 'Сигналы доступны без проверки регистрации и депозита.',
+  },
+];
 const STREAM_ANALYSIS_TYPES = [
   { key: 'forex', title: 'Forex' },
   { key: 'binary', title: 'Binary' },
@@ -280,7 +296,8 @@ export default function SettingsPage({ adminUser }) {
   const [streamMarketOptions, setStreamMarketOptions] = useState([]);
   const [streamMarketLoading, setStreamMarketLoading] = useState(false);
 
-  const [systemAccessEnabled, setSystemAccessEnabled] = useState(true);
+  const [systemAccessPolicy, setSystemAccessPolicy] = useState('registration_deposit');
+  const [systemMinDeposit, setSystemMinDeposit] = useState('0.00');
   const [channelId, setChannelId] = useState('-1003584421739');
   const [channelUrl, setChannelUrl] = useState('');
   const [checkSubscriptionEnabled, setCheckSubscriptionEnabled] = useState(true);
@@ -294,15 +311,6 @@ export default function SettingsPage({ adminUser }) {
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(ACCESS_STORAGE_KEY);
-      if (saved === '0') {
-        setSystemAccessEnabled(false);
-      }
-    } catch {}
-  }, []);
 
   const loadAll = useCallback(async () => {
     setError('');
@@ -377,6 +385,13 @@ export default function SettingsPage({ adminUser }) {
       setPocketApiToken('');
       setPocketApiTokenMasked(pocket.api_token_masked || '');
       setPocketApiTokenConfigured(Boolean(Number(pocket.api_token_configured || 0)));
+
+      const access = settingsRes?.settings?.system_access || {};
+      const nextPolicy = ACCESS_POLICIES.some((item) => item.key === access.policy)
+        ? access.policy
+        : 'registration_deposit';
+      setSystemAccessPolicy(nextPolicy);
+      setSystemMinDeposit(access.min_deposit_amount !== null && access.min_deposit_amount !== undefined ? String(access.min_deposit_amount) : '0.00');
     } catch (e) {
       setError(e.message || 'Не удалось загрузить настройки');
     }
@@ -470,6 +485,7 @@ export default function SettingsPage({ adminUser }) {
     const shouldSaveStreams = source === 'streams' || source === 'all';
     const shouldSaveSupport = source === 'support' || source === 'all';
     const shouldSavePocket = source === 'pocket' || source === 'all';
+    const shouldSaveAccess = source === 'access' || source === 'all';
 
     if (shouldSaveStreams && streamEnabled && streamScope === 'strategy' && !streamStrategyId) {
       setError('Выберите стратегию для стрима');
@@ -485,6 +501,11 @@ export default function SettingsPage({ adminUser }) {
     }
     if (shouldSaveStreams && streamManualPrice.trim() && emulationPrice === null) {
       setError('Текущая цена должна быть числом');
+      return;
+    }
+    const minDeposit = toMaybeNumber(systemMinDeposit);
+    if (shouldSaveAccess && systemAccessPolicy === 'registration_deposit' && minDeposit === null) {
+      setError('Минимальная сумма депозита должна быть числом');
       return;
     }
     if (shouldSaveSupport) {
@@ -550,6 +571,13 @@ export default function SettingsPage({ adminUser }) {
         };
       }
 
+      if (shouldSaveAccess) {
+        payload.system_access = {
+          policy: systemAccessPolicy,
+          min_deposit_amount: systemAccessPolicy === 'registration_deposit' ? minDeposit : 0,
+        };
+      }
+
       await apiAdminFetchJson('/api/admin/settings', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -565,6 +593,8 @@ export default function SettingsPage({ adminUser }) {
         setStatus('Pocket API сохранен');
         setPocketApiToken('');
         await loadAll();
+      } else if (source === 'access') {
+        setStatus('Настройки доступа сохранены');
       } else {
         setStatus('Настройки сохранены');
       }
@@ -607,16 +637,6 @@ export default function SettingsPage({ adminUser }) {
     } catch (e) {
       setError(e.message || 'Не удалось снять админку');
     }
-  };
-
-  const toggleSystemAccess = () => {
-    const next = !systemAccessEnabled;
-    setSystemAccessEnabled(next);
-    setError('');
-    setStatus(next ? 'Доступ к системе включен (frontend fallback)' : 'Доступ к системе выключен (frontend fallback)');
-    try {
-      window.localStorage.setItem(ACCESS_STORAGE_KEY, next ? '1' : '0');
-    } catch {}
   };
 
   const setIndicatorSignal = (indicatorNorm, signal) => {
@@ -725,9 +745,9 @@ export default function SettingsPage({ adminUser }) {
       },
       {
         key: 'access',
-        icon: systemAccessEnabled ? '✅' : '⛔',
+        icon: '✅',
         title: 'Доступ к системе',
-        subtitle: systemAccessEnabled ? 'Доступ открыт' : 'Доступ ограничен',
+        subtitle: ACCESS_POLICIES.find((item) => item.key === systemAccessPolicy)?.title || 'Правило доступа',
       },
       {
         key: 'support',
@@ -748,7 +768,7 @@ export default function SettingsPage({ adminUser }) {
         subtitle: `Текущих админов: ${admins.length}`,
       },
     ],
-    [admins.length, channelUrl, checkSubscriptionEnabled, model, pocketApiTokenConfigured, pocketApiTokenMasked, pocketPartnerId, streamEnabled, supportUrl, systemAccessEnabled]
+    [admins.length, channelUrl, checkSubscriptionEnabled, model, pocketApiTokenConfigured, pocketApiTokenMasked, pocketPartnerId, streamEnabled, supportUrl, systemAccessPolicy]
   );
 
   const goMenu = () => {
@@ -1166,20 +1186,47 @@ export default function SettingsPage({ adminUser }) {
           <button className="admin-btn-outline" onClick={goMenu}>← К карточкам</button>
         </div>
 
-        <div className="admin-field">
-          <label className="admin-label">Режим доступа</label>
-          <label className="admin-muted">
-            <input
-              type="checkbox"
-              checked={systemAccessEnabled}
-              onChange={toggleSystemAccess}
-            />{' '}
-            {systemAccessEnabled ? 'Доступ открыт' : 'Доступ ограничен'}
-          </label>
+        <div className="admin-muted">
+          Эти переменные управляют доступом к получению сигналов. Ручная выдача доступа в карточке пользователя остается персональным override.
         </div>
 
-        <div className="admin-muted">
-          Сейчас это временный frontend fallback. Когда подключим backend и БД под доступ, логика автоматически переедет сюда.
+        <div className="admin-access-policy-list">
+          {ACCESS_POLICIES.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`admin-access-policy ${systemAccessPolicy === item.key ? 'active' : ''}`}
+              onClick={() => setSystemAccessPolicy(item.key)}
+            >
+              <span className="admin-access-radio">{systemAccessPolicy === item.key ? '●' : '○'}</span>
+              <span>
+                <strong>{item.title}</strong>
+                <small>{item.description}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {systemAccessPolicy === 'registration_deposit' ? (
+          <div className="admin-field">
+            <label className="admin-label">Минимальная общая сумма депозитов, $</label>
+            <input
+              className="admin-input"
+              value={systemMinDeposit}
+              onChange={(e) => setSystemMinDeposit(e.target.value)}
+              placeholder="100.00"
+              inputMode="decimal"
+            />
+            <div className="admin-muted">
+              FTD и повторные депозиты суммируются. Когда сумма станет равна или выше этого значения, доступ к сигналам откроется автоматически.
+            </div>
+          </div>
+        ) : null}
+
+        <div className="admin-row-actions">
+          <button className="admin-btn" onClick={() => saveSettings('access')} disabled={saving}>
+            {saving ? 'Сохранение...' : 'Сохранить доступ'}
+          </button>
         </div>
 
         {error ? <div className="admin-error">{error}</div> : null}

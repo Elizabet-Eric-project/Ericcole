@@ -1,6 +1,8 @@
 import unittest
 
 from pocket_api import (
+    POCKET_DEPOSIT_EVENT,
+    POCKET_FTD_EVENT,
     POCKET_REGISTRATION_EVENT,
     build_pocket_user_info_url,
     mask_secret,
@@ -50,6 +52,35 @@ class PocketApiTest(unittest.TestCase):
 
         self.assertEqual(normalized["event_slug"], POCKET_REGISTRATION_EVENT)
         self.assertIsNone(normalized["telegram_id"])
+
+    def test_normalizes_first_deposit_postback(self):
+        normalized = normalize_pocket_postback_payload(
+            {
+                "event": "ftd",
+                "click_id": "7097261848",
+                "trader_id": "900102",
+                "sumdep": "250.50",
+                "sub_id2": "tracker-click-123",
+            }
+        )
+
+        self.assertEqual(normalized["event_slug"], POCKET_FTD_EVENT)
+        self.assertEqual(normalized["telegram_id"], 7097261848)
+        self.assertEqual(normalized["deposit_amount"], "250.50")
+        self.assertEqual(normalized["unique_key"], "ftd:7097261848:900102:250.50")
+
+    def test_normalizes_repeat_deposit_postback(self):
+        normalized = normalize_pocket_postback_payload(
+            {
+                "event": "repeat_deposit",
+                "click_id": "7097261848",
+                "trader_id": "900102",
+                "sumdep": "40",
+            }
+        )
+
+        self.assertEqual(normalized["event_slug"], POCKET_DEPOSIT_EVENT)
+        self.assertEqual(normalized["deposit_amount"], "40.00")
 
 
 if __name__ == "__main__":

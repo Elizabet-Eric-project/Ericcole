@@ -55,6 +55,8 @@ except ModuleNotFoundError:
     )
 try:
     from backend.pocket_api import (
+        POCKET_DEPOSIT_EVENT,
+        POCKET_FTD_EVENT,
         POCKET_REGISTRATION_EVENT,
         POCKET_USER_INFO_ENDPOINT_TEMPLATE,
         build_pocket_user_info_url,
@@ -63,11 +65,31 @@ try:
     )
 except ModuleNotFoundError:
     from pocket_api import (
+        POCKET_DEPOSIT_EVENT,
+        POCKET_FTD_EVENT,
         POCKET_REGISTRATION_EVENT,
         POCKET_USER_INFO_ENDPOINT_TEMPLATE,
         build_pocket_user_info_url,
         mask_secret,
         normalize_pocket_postback_payload,
+    )
+try:
+    from backend.access_policy import (
+        ACCESS_POLICY_ALL,
+        ACCESS_POLICY_REGISTRATION,
+        ACCESS_POLICY_REGISTRATION_DEPOSIT,
+        normalize_access_policy,
+        normalize_min_deposit,
+        system_policy_grants_signal_access,
+    )
+except ModuleNotFoundError:
+    from access_policy import (
+        ACCESS_POLICY_ALL,
+        ACCESS_POLICY_REGISTRATION,
+        ACCESS_POLICY_REGISTRATION_DEPOSIT,
+        normalize_access_policy,
+        normalize_min_deposit,
+        system_policy_grants_signal_access,
     )
 try:
     from backend.aio_tracking import (
@@ -634,10 +656,10 @@ async def insert_pocket_postback_log(
             await cur.execute(
                 """
                 INSERT INTO pocket_postback_events (
-                    event_slug, unique_key, user_id, click_id, trader_id, site_id, cid, sub_id1, sub_id2,
+                    event_slug, unique_key, user_id, click_id, trader_id, deposit_amount, site_id, cid, sub_id1, sub_id2,
                     raw_payload, status, reason, source_ip
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     normalized.get("event_slug") or "unknown",
@@ -645,6 +667,7 @@ async def insert_pocket_postback_log(
                     user_id,
                     normalized.get("click_id") or None,
                     normalized.get("trader_id") or None,
+                    normalized.get("deposit_amount") or "0.00",
                     normalized.get("site_id") or None,
                     normalized.get("cid") or None,
                     normalized.get("sub_id1") or None,
@@ -754,6 +777,78 @@ async def send_chatterfy_pocket_registration_postback(
     return result
 
 
+def map_pocket_event_to_aio_event(event_slug: str) -> Optional[str]:
+    if event_slug == POCKET_REGISTRATION_EVENT:
+        return "lead"
+    if event_slug == POCKET_FTD_EVENT:
+        return "ftd"
+    if event_slug == POCKET_DEPOSIT_EVENT:
+        return "dep"
+    return None
+
+
+async def grant_mode_access_if_system_policy_allows(user_id: int, updated_by: int = 0) -> bool:
+    settings = await get_system_access_settings_row()
+    async with db_pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT user_id,
+                       COALESCE(pocket_registered, 0) AS pocket_registered,
+                       COALESCE(pocket_deposited, 0) AS pocket_deposited,
+                       COALESCE(pocket_deposit_amount, 0) AS pocket_deposit_amount
+                FROM users
+                WHERE user_id = %s
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            user_row = await cur.fetchone()
+            if not user_row or not system_policy_grants_signal_access(settings, user_row):
+                return False
+            await cur.executemany(
+                """
+                INSERT INTO user_mode_access (user_id, mode, is_enabled, updated_by)
+                VALUES (%s, %s, 1, %s)
+                ON DUPLICATE KEY UPDATE
+                    is_enabled = 1,
+                    updated_by = VALUES(updated_by)
+                """,
+                ((user_id, "forex", updated_by), (user_id, "binary", updated_by)),
+            )
+            return True
+
+
+async def send_pocket_aio_delivery(
+    *,
+    user_id: int,
+    event_slug: str,
+    unique_key: str,
+    trader_id: str = "",
+    first_deposit_amount: str = "",
+    total_deposit_amount: str = "",
+) -> Dict[str, Any]:
+    aio_event = map_pocket_event_to_aio_event(event_slug)
+    postback_result = None
+    if aio_event:
+        postback_result = await send_aio_postback_event(user_id, aio_event, unique_key=unique_key)
+
+    field_results = []
+    if trader_id:
+        field_results.append(await send_aio_field_value(user_id, "tg_trader_id", trader_id))
+    if event_slug == POCKET_FTD_EVENT and first_deposit_amount:
+        field_results.append(await send_aio_field_value(user_id, "tg_first_dep", first_deposit_amount))
+    if event_slug in {POCKET_FTD_EVENT, POCKET_DEPOSIT_EVENT} and total_deposit_amount:
+        field_results.append(await send_aio_field_value(user_id, "tg_sum_dep", total_deposit_amount))
+
+    return {
+        "status": (postback_result or {}).get("status") or "skipped",
+        "aio_event": aio_event,
+        "postback": postback_result,
+        "fields": field_results,
+    }
+
+
 @app.api_route("/api/integrations/pocket/postback", methods=["GET", "POST"])
 async def pocket_postback(request: Request):
     if not db_pool:
@@ -778,8 +873,9 @@ async def pocket_postback(request: Request):
     cid = normalized.get("cid") or ""
     sub_id1 = normalized.get("sub_id1") or ""
     sub_id2 = normalized.get("sub_id2") or ""
+    deposit_amount = normalize_min_deposit(normalized.get("deposit_amount"))
 
-    if event_slug != POCKET_REGISTRATION_EVENT:
+    if event_slug not in {POCKET_REGISTRATION_EVENT, POCKET_FTD_EVENT, POCKET_DEPOSIT_EVENT}:
         log_id = await insert_pocket_postback_log(
             normalized, payload, "skipped", "unsupported_event", telegram_id, source_ip
         )
@@ -791,6 +887,13 @@ async def pocket_postback(request: Request):
         )
         return {"status": "skipped", "reason": "missing_click_id", "log_id": log_id}
 
+    if event_slug in {POCKET_FTD_EVENT, POCKET_DEPOSIT_EVENT} and deposit_amount <= 0:
+        log_id = await insert_pocket_postback_log(
+            normalized, payload, "skipped", "invalid_deposit_amount", telegram_id, source_ip
+        )
+        return {"status": "skipped", "reason": "invalid_deposit_amount", "log_id": log_id}
+
+    updated_user_row = None
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute(
@@ -809,55 +912,108 @@ async def pocket_postback(request: Request):
                 )
                 return {"status": "skipped", "reason": "user_not_found", "log_id": log_id}
 
+            if event_slug == POCKET_REGISTRATION_EVENT:
+                await cur.execute(
+                    """
+                    UPDATE users
+                    SET trader_id = CASE WHEN %s <> '' THEN %s ELSE trader_id END,
+                        pocket_click_id = CASE WHEN %s <> '' THEN %s ELSE pocket_click_id END,
+                        pocket_site_id = CASE WHEN %s <> '' THEN %s ELSE pocket_site_id END,
+                        pocket_cid = CASE WHEN %s <> '' THEN %s ELSE pocket_cid END,
+                        pocket_sub_id1 = CASE WHEN %s <> '' THEN %s ELSE pocket_sub_id1 END,
+                        pocket_sub_id2 = CASE WHEN %s <> '' THEN %s ELSE pocket_sub_id2 END,
+                        pocket_registered = 1,
+                        pocket_registered_at = COALESCE(pocket_registered_at, DATE_FORMAT(NOW(), '%%Y-%%m-%%dT%%H:%%i:%%sZ')),
+                        pocket_checked_at = NOW()
+                    WHERE user_id = %s
+                    """,
+                    (
+                        trader_id,
+                        trader_id,
+                        click_id,
+                        click_id,
+                        site_id,
+                        site_id,
+                        cid,
+                        cid,
+                        sub_id1,
+                        sub_id1,
+                        sub_id2,
+                        sub_id2,
+                        telegram_id,
+                    ),
+                )
+            else:
+                await cur.execute(
+                    """
+                    UPDATE users
+                    SET trader_id = CASE WHEN %s <> '' THEN %s ELSE trader_id END,
+                        pocket_click_id = CASE WHEN %s <> '' THEN %s ELSE pocket_click_id END,
+                        pocket_site_id = CASE WHEN %s <> '' THEN %s ELSE pocket_site_id END,
+                        pocket_cid = CASE WHEN %s <> '' THEN %s ELSE pocket_cid END,
+                        pocket_sub_id1 = CASE WHEN %s <> '' THEN %s ELSE pocket_sub_id1 END,
+                        pocket_sub_id2 = CASE WHEN %s <> '' THEN %s ELSE pocket_sub_id2 END,
+                        pocket_registered = 1,
+                        pocket_registered_at = COALESCE(pocket_registered_at, DATE_FORMAT(NOW(), '%%Y-%%m-%%dT%%H:%%i:%%sZ')),
+                        pocket_deposited = 1,
+                        pocket_deposit_amount = COALESCE(pocket_deposit_amount, 0) + %s,
+                        pocket_checked_at = NOW()
+                    WHERE user_id = %s
+                    """,
+                    (
+                        trader_id,
+                        trader_id,
+                        click_id,
+                        click_id,
+                        site_id,
+                        site_id,
+                        cid,
+                        cid,
+                        sub_id1,
+                        sub_id1,
+                        sub_id2,
+                        sub_id2,
+                        str(deposit_amount),
+                        telegram_id,
+                    ),
+                )
             await cur.execute(
                 """
-                UPDATE users
-                SET trader_id = CASE WHEN %s <> '' THEN %s ELSE trader_id END,
-                    pocket_click_id = CASE WHEN %s <> '' THEN %s ELSE pocket_click_id END,
-                    pocket_site_id = CASE WHEN %s <> '' THEN %s ELSE pocket_site_id END,
-                    pocket_cid = CASE WHEN %s <> '' THEN %s ELSE pocket_cid END,
-                    pocket_sub_id1 = CASE WHEN %s <> '' THEN %s ELSE pocket_sub_id1 END,
-                    pocket_sub_id2 = CASE WHEN %s <> '' THEN %s ELSE pocket_sub_id2 END,
-                    pocket_registered = 1,
-                    pocket_registered_at = COALESCE(pocket_registered_at, DATE_FORMAT(NOW(), '%%Y-%%m-%%dT%%H:%%i:%%sZ')),
-                    pocket_checked_at = NOW()
+                SELECT COALESCE(pocket_deposit_amount, 0) AS pocket_deposit_amount
+                FROM users
                 WHERE user_id = %s
+                LIMIT 1
                 """,
-                (
-                    trader_id,
-                    trader_id,
-                    click_id,
-                    click_id,
-                    site_id,
-                    site_id,
-                    cid,
-                    cid,
-                    sub_id1,
-                    sub_id1,
-                    sub_id2,
-                    sub_id2,
-                    telegram_id,
-                ),
+                (telegram_id,),
             )
+            updated_user_row = await cur.fetchone()
 
-    log_id = await insert_pocket_postback_log(normalized, payload, "registered", None, telegram_id, source_ip)
-    chatterfy_result = await send_chatterfy_pocket_registration_postback(
-        log_id=log_id,
-        clickid=sub_id2,
+    status = "registered" if event_slug == POCKET_REGISTRATION_EVENT else "deposited"
+    log_id = await insert_pocket_postback_log(normalized, payload, status, None, telegram_id, source_ip)
+    access_granted = await grant_mode_access_if_system_policy_allows(int(telegram_id), updated_by=0)
+    total_deposit_amount = str(normalize_min_deposit((updated_user_row or {}).get("pocket_deposit_amount")))
+    aio_result = await send_pocket_aio_delivery(
+        user_id=int(telegram_id),
+        event_slug=event_slug,
+        unique_key=normalized.get("unique_key") or event_slug,
         trader_id=trader_id,
-        trader_aio_id=(user_row or {}).get("aio_visit_uuid") or "",
-        tgid=int(telegram_id),
+        first_deposit_amount=str(deposit_amount) if event_slug == POCKET_FTD_EVENT else "",
+        total_deposit_amount=total_deposit_amount if event_slug in {POCKET_FTD_EVENT, POCKET_DEPOSIT_EVENT} else "",
     )
     return {
-        "status": "registered",
+        "status": status,
         "log_id": log_id,
         "user_id": telegram_id,
+        "event": event_slug,
         "trader_id": trader_id or None,
+        "deposit_amount": str(deposit_amount) if event_slug in {POCKET_FTD_EVENT, POCKET_DEPOSIT_EVENT} else None,
+        "total_deposit_amount": total_deposit_amount if event_slug in {POCKET_FTD_EVENT, POCKET_DEPOSIT_EVENT} else None,
         "site_id": site_id or None,
         "cid": cid or None,
         "sub_id1": sub_id1 or None,
         "sub_id2": sub_id2 or None,
-        "chatterfy": chatterfy_result,
+        "access_granted": access_granted,
+        "aio": aio_result,
     }
 
 
@@ -1845,6 +2001,41 @@ async def get_pocket_api_settings_row(include_token: bool = False):
     return settings
 
 
+def serialize_system_access_settings(row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    policy = normalize_access_policy((row or {}).get("policy"))
+    min_deposit = normalize_min_deposit((row or {}).get("min_deposit_amount"))
+    return {
+        "policy": policy,
+        "min_deposit_amount": str(min_deposit),
+        "updated_at": (row or {}).get("updated_at"),
+        "updated_by": (row or {}).get("updated_by"),
+    }
+
+
+async def get_system_access_settings_row() -> Dict[str, Any]:
+    default_settings = serialize_system_access_settings(
+        {"policy": ACCESS_POLICY_REGISTRATION_DEPOSIT, "min_deposit_amount": "0"}
+    )
+    if not db_pool:
+        return default_settings
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    """
+                    SELECT policy, min_deposit_amount, updated_at, updated_by
+                    FROM admin_system_access_settings
+                    WHERE id = 1
+                    LIMIT 1
+                    """
+                )
+                row = await cur.fetchone()
+        return serialize_system_access_settings(row) if row else default_settings
+    except Exception as e:
+        print(f"System access settings fallback: {e}")
+        return default_settings
+
+
 def truthy_db(value) -> int:
     try:
         return 1 if int(value or 0) == 1 else 0
@@ -1999,19 +2190,34 @@ async def get_signal_access_status(user_id: int, mode: str) -> Dict[str, Any]:
     normalized_mode = str(mode or "").strip().lower()
     if normalized_mode not in ("forex", "binary"):
         return {"access": 0}
+    settings = await get_system_access_settings_row()
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute(
                 """
-                SELECT is_enabled
-                FROM user_mode_access
-                WHERE user_id = %s AND mode = %s
+                SELECT
+                    u.user_id,
+                    COALESCE(u.pocket_registered, 0) AS pocket_registered,
+                    COALESCE(u.pocket_deposited, 0) AS pocket_deposited,
+                    COALESCE(u.pocket_deposit_amount, 0) AS pocket_deposit_amount,
+                    COALESCE(uma.is_enabled, 0) AS manual_access
+                FROM users u
+                LEFT JOIN user_mode_access uma ON uma.user_id = u.user_id AND uma.mode = %s
+                WHERE u.user_id = %s
                 LIMIT 1
                 """,
-                (user_id, normalized_mode),
+                (normalized_mode, user_id),
             )
             row = await cur.fetchone()
-    return {"access": truthy_db((row or {}).get("is_enabled"))}
+    if not row:
+        return {"access": 0, "policy": settings.get("policy")}
+    if truthy_db(row.get("manual_access")) == 1:
+        return {"access": 1, "policy": "manual"}
+    return {
+        "access": 1 if system_policy_grants_signal_access(settings, row) else 0,
+        "policy": settings.get("policy"),
+        "min_deposit_amount": settings.get("min_deposit_amount"),
+    }
 
 
 async def refresh_signal_access_from_pocket(user_id: int) -> bool:
@@ -2660,6 +2866,7 @@ async def admin_settings(admin=Depends(get_admin_user)):
     stream_settings = await get_stream_settings_row()
     support_links = await get_support_links_row()
     pocket_settings = await get_pocket_api_settings_row()
+    system_access_settings = await get_system_access_settings_row()
     async with db_pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("SELECT id, system_prompt, model, updated_at FROM ai_settings WHERE id = 1")
@@ -2692,6 +2899,7 @@ async def admin_settings(admin=Depends(get_admin_user)):
             "stream_strategies": stream_strategies or [],
             "support": support_links,
             "pocket_api": pocket_settings,
+            "system_access": system_access_settings,
         },
     }
 
@@ -2703,6 +2911,7 @@ async def admin_settings_update(request: Request, admin=Depends(get_admin_user))
     streams_data = data.get("streams") or {}
     support_data = data.get("support") or {}
     pocket_data = data.get("pocket_api") or {}
+    system_access_data = data.get("system_access") or {}
     system_prompt = (ai_data.get("system_prompt") or "").strip()
     model = (ai_data.get("model") or "").strip()
 
@@ -2936,6 +3145,22 @@ async def admin_settings_update(request: Request, admin=Depends(get_admin_user))
                         """,
                         (partner_id, int(admin["user_id"]), 1 if clear_token else 0),
                     )
+            if isinstance(system_access_data, dict) and system_access_data:
+                access_policy = normalize_access_policy(system_access_data.get("policy"))
+                min_deposit = normalize_min_deposit(system_access_data.get("min_deposit_amount"))
+                if access_policy != ACCESS_POLICY_REGISTRATION_DEPOSIT:
+                    min_deposit = normalize_min_deposit("0")
+                await cur.execute(
+                    """
+                    INSERT INTO admin_system_access_settings (id, policy, min_deposit_amount, updated_by)
+                    VALUES (1, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        policy = VALUES(policy),
+                        min_deposit_amount = VALUES(min_deposit_amount),
+                        updated_by = VALUES(updated_by)
+                    """,
+                    (access_policy, str(min_deposit), int(admin["user_id"])),
+                )
     return {"status": "success"}
 
 
