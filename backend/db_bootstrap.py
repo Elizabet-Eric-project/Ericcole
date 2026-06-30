@@ -94,6 +94,10 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
                     avatar_url TEXT NULL,
                     aio_visit_uuid VARCHAR(64) NULL,
                     trader_id VARCHAR(64) NULL,
+                    pocket_click_id VARCHAR(64) NULL,
+                    pocket_site_id VARCHAR(128) NULL,
+                    pocket_cid VARCHAR(128) NULL,
+                    pocket_sub_id1 VARCHAR(255) NULL,
                     balance DECIMAL(18,2) NOT NULL DEFAULT 0.00,
                     balance_sync_enabled TINYINT(1) NOT NULL DEFAULT 0,
                     balance_synced_at TIMESTAMP NULL DEFAULT NULL,
@@ -425,6 +429,10 @@ async def ensure_database_schema(db_pool: aiomysql.Pool) -> None:
 
         await _ensure_column(conn, db_name, "users", "trader_id", "ALTER TABLE users ADD COLUMN trader_id VARCHAR(64) NULL")
         await _ensure_column(conn, db_name, "users", "aio_visit_uuid", "ALTER TABLE users ADD COLUMN aio_visit_uuid VARCHAR(64) NULL")
+        await _ensure_column(conn, db_name, "users", "pocket_click_id", "ALTER TABLE users ADD COLUMN pocket_click_id VARCHAR(64) NULL")
+        await _ensure_column(conn, db_name, "users", "pocket_site_id", "ALTER TABLE users ADD COLUMN pocket_site_id VARCHAR(128) NULL")
+        await _ensure_column(conn, db_name, "users", "pocket_cid", "ALTER TABLE users ADD COLUMN pocket_cid VARCHAR(128) NULL")
+        await _ensure_column(conn, db_name, "users", "pocket_sub_id1", "ALTER TABLE users ADD COLUMN pocket_sub_id1 VARCHAR(255) NULL")
         await _ensure_column(conn, db_name, "users", "balance", "ALTER TABLE users ADD COLUMN balance DECIMAL(18,2) NOT NULL DEFAULT 0.00")
         await _ensure_column(conn, db_name, "users", "balance_sync_enabled", "ALTER TABLE users ADD COLUMN balance_sync_enabled TINYINT(1) NOT NULL DEFAULT 0")
         await _ensure_column(conn, db_name, "users", "balance_synced_at", "ALTER TABLE users ADD COLUMN balance_synced_at TIMESTAMP NULL DEFAULT NULL")
