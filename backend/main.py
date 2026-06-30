@@ -54,9 +54,21 @@ except ModuleNotFoundError:
         merge_custom_market_assets,
     )
 try:
-    from backend.pocket_api import POCKET_USER_INFO_ENDPOINT_TEMPLATE, build_pocket_user_info_url, mask_secret
+    from backend.pocket_api import (
+        POCKET_REGISTRATION_EVENT,
+        POCKET_USER_INFO_ENDPOINT_TEMPLATE,
+        build_pocket_user_info_url,
+        mask_secret,
+        normalize_pocket_postback_payload,
+    )
 except ModuleNotFoundError:
-    from pocket_api import POCKET_USER_INFO_ENDPOINT_TEMPLATE, build_pocket_user_info_url, mask_secret
+    from pocket_api import (
+        POCKET_REGISTRATION_EVENT,
+        POCKET_USER_INFO_ENDPOINT_TEMPLATE,
+        build_pocket_user_info_url,
+        mask_secret,
+        normalize_pocket_postback_payload,
+    )
 try:
     from backend.aio_tracking import (
         build_aio_field_trigger_url,
@@ -170,6 +182,7 @@ DB_CONFIG = {
     "autocommit": True
 }
 CHATTERFY_POSTBACK_SECRET = (os.getenv("CHATTERFY_POSTBACK_SECRET") or "").strip()
+POCKET_POSTBACK_SECRET = (os.getenv("POCKET_POSTBACK_SECRET") or "").strip()
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -490,6 +503,10 @@ def get_chatterfy_postback_secret() -> str:
     return (os.getenv("CHATTERFY_POSTBACK_SECRET") or CHATTERFY_POSTBACK_SECRET or "").strip()
 
 
+def get_pocket_postback_secret() -> str:
+    return (os.getenv("POCKET_POSTBACK_SECRET") or POCKET_POSTBACK_SECRET or "").strip()
+
+
 async def insert_chatterfy_postback_log(
     normalized: Dict[str, Any],
     raw_payload: Dict[str, Any],
@@ -597,6 +614,104 @@ async def finish_chatterfy_postback_delivery(log_id: int, telegram_id: int, norm
         await update_chatterfy_postback_log(log_id, final_status, reason, aio_result, fields_result)
     except Exception as exc:
         await update_chatterfy_postback_log(log_id, "failed", str(exc)[:4000])
+
+
+async def insert_pocket_postback_log(
+    normalized: Dict[str, Any],
+    raw_payload: Dict[str, Any],
+    status: str,
+    reason: Optional[str],
+    user_id: Optional[int],
+    source_ip: str,
+) -> int:
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO pocket_postback_events (
+                    event_slug, unique_key, user_id, click_id, trader_id, site_id, cid, sub_id1,
+                    raw_payload, status, reason, source_ip
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    normalized.get("event_slug") or "unknown",
+                    normalized.get("unique_key") or "unknown",
+                    user_id,
+                    normalized.get("click_id") or None,
+                    normalized.get("trader_id") or None,
+                    normalized.get("site_id") or None,
+                    normalized.get("cid") or None,
+                    normalized.get("sub_id1") or None,
+                    json.dumps(raw_payload, ensure_ascii=False, default=str),
+                    status,
+                    reason,
+                    source_ip,
+                ),
+            )
+            return int(cur.lastrowid)
+
+
+@app.api_route("/api/integrations/pocket/postback", methods=["GET", "POST"])
+async def pocket_postback(request: Request):
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="Database is unavailable")
+
+    expected_secret = get_pocket_postback_secret()
+    if not expected_secret:
+        raise HTTPException(status_code=503, detail="Pocket postback secret is not configured")
+
+    payload = await read_postback_payload(request)
+    provided_secret = str(payload.get("secret") or request.headers.get("X-Pocket-Secret") or "").strip()
+    if not provided_secret or not secrets.compare_digest(provided_secret, expected_secret):
+        raise HTTPException(status_code=403, detail="Invalid postback secret")
+
+    normalized = normalize_pocket_postback_payload(payload)
+    source_ip = request.client.host if request.client else ""
+    event_slug = normalized.get("event_slug")
+    telegram_id = normalized.get("telegram_id")
+    trader_id = normalized.get("trader_id") or ""
+
+    if event_slug != POCKET_REGISTRATION_EVENT:
+        log_id = await insert_pocket_postback_log(
+            normalized, payload, "skipped", "unsupported_event", telegram_id, source_ip
+        )
+        return {"status": "skipped", "reason": "unsupported_event", "log_id": log_id}
+
+    if not telegram_id:
+        log_id = await insert_pocket_postback_log(
+            normalized, payload, "skipped", "missing_click_id", None, source_ip
+        )
+        return {"status": "skipped", "reason": "missing_click_id", "log_id": log_id}
+
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE users
+                SET trader_id = CASE WHEN %s <> '' THEN %s ELSE trader_id END,
+                    pocket_registered = 1,
+                    pocket_registered_at = COALESCE(pocket_registered_at, DATE_FORMAT(NOW(), '%%Y-%%m-%%dT%%H:%%i:%%sZ')),
+                    pocket_checked_at = NOW()
+                WHERE user_id = %s
+                """,
+                (trader_id, trader_id, telegram_id),
+            )
+            matched = cur.rowcount > 0
+
+    if not matched:
+        log_id = await insert_pocket_postback_log(
+            normalized, payload, "skipped", "user_not_found", telegram_id, source_ip
+        )
+        return {"status": "skipped", "reason": "user_not_found", "log_id": log_id}
+
+    log_id = await insert_pocket_postback_log(normalized, payload, "registered", None, telegram_id, source_ip)
+    return {
+        "status": "registered",
+        "log_id": log_id,
+        "user_id": telegram_id,
+        "trader_id": trader_id or None,
+    }
 
 
 @app.api_route("/api/integrations/chatterfy/postback", methods=["GET", "POST"])
