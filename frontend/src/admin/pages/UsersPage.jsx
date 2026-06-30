@@ -204,7 +204,7 @@ export default function UsersPage() {
             <div><span>Pocket site_id:</span> {selectedUser.pocket_site_id || '-'}</div>
             <div><span>Pocket cid:</span> {selectedUser.pocket_cid || '-'}</div>
             <div><span>Pocket sub_id1:</span> {selectedUser.pocket_sub_id1 || '-'}</div>
-            <div><span>Pocket sub_id2:</span> {selectedUser.pocket_sub_id2 || '-'}</div>
+            <div><span>clickid Chatterfy:</span> {selectedUser.pocket_sub_id2 || '-'}</div>
             <div><span>Доступ Forex:</span> {hasAccess(selectedUser.forex_access) ? 'Есть' : 'Нету'}</div>
             <div><span>Доступ Binary:</span> {hasAccess(selectedUser.binary_access) ? 'Есть' : 'Нету'}</div>
             <div><span>Username:</span> {selectedUser.username || '-'}</div>

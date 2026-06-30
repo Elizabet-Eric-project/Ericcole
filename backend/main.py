@@ -6,7 +6,7 @@ import json
 import secrets
 import random
 from datetime import datetime, timedelta
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
 from fastapi import FastAPI, Request, Depends, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, types
@@ -206,6 +206,11 @@ if not admin_panel_token and os.path.exists(admin_token_file_path):
             admin_panel_token = f.read().strip()
     except Exception:
         admin_panel_token = ""
+
+CHATTERFY_POCKET_REG_POSTBACK_BASE_URL = (
+    "https://api.chatterfy.ai/api/postbacks/"
+    "b43a6913-5957-4ad6-835a-9e3474c2665a/tracker-postback"
+)
 
 analysis_queue = asyncio.Queue()
 processing_ids = set() 
@@ -653,6 +658,93 @@ async def insert_pocket_postback_log(
             return int(cur.lastrowid)
 
 
+def build_chatterfy_pocket_registration_url(
+    clickid: str,
+    trader_id: str,
+    trader_aio_id: str,
+    tgid: int,
+) -> str:
+    query = urlencode(
+        {
+            "tracker.event": "reg",
+            "clickid": str(clickid or "").strip(),
+            "fields.trader_id": str(trader_id or "").strip(),
+            "fields.trader_aio_id": str(trader_aio_id or "").strip(),
+            "fields.tgid": str(tgid),
+        }
+    )
+    return f"{CHATTERFY_POCKET_REG_POSTBACK_BASE_URL}?{query}"
+
+
+async def update_pocket_chatterfy_delivery(log_id: int, result: Dict[str, Any]) -> None:
+    if not log_id or not db_pool:
+        return
+    async with db_pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE pocket_postback_events
+                SET chatterfy_request_url = %s,
+                    chatterfy_status = %s,
+                    chatterfy_response_status = %s,
+                    chatterfy_response_body = %s,
+                    chatterfy_error = %s,
+                    chatterfy_sent_at = NOW()
+                WHERE id = %s
+                """,
+                (
+                    result.get("url"),
+                    result.get("status"),
+                    result.get("response_status"),
+                    result.get("response_body"),
+                    result.get("error") or result.get("reason"),
+                    log_id,
+                ),
+            )
+
+
+async def send_chatterfy_pocket_registration_postback(
+    *,
+    log_id: int,
+    clickid: str,
+    trader_id: str,
+    trader_aio_id: str,
+    tgid: int,
+) -> Dict[str, Any]:
+    clickid = str(clickid or "").strip()
+    trader_id = str(trader_id or "").strip()
+    trader_aio_id = normalize_aio_visit_uuid(trader_aio_id)
+    if not clickid:
+        result = {"status": "skipped", "reason": "missing_chatterfy_clickid"}
+        await update_pocket_chatterfy_delivery(log_id, result)
+        return result
+    if not trader_aio_id:
+        result = {"status": "skipped", "reason": "missing_aio_visit_uuid"}
+        await update_pocket_chatterfy_delivery(log_id, result)
+        return result
+
+    request_url = build_chatterfy_pocket_registration_url(clickid, trader_id, trader_aio_id, tgid)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(request_url)
+        result = {
+            "url": request_url,
+            "status": "sent" if response.status_code < 400 else "failed",
+            "response_status": response.status_code,
+            "response_body": response.text[:4000],
+        }
+        if response.status_code >= 400:
+            result["error"] = f"Chatterfy returned HTTP {response.status_code}"
+    except Exception as exc:
+        result = {
+            "url": request_url,
+            "status": "failed",
+            "error": str(exc)[:4000],
+        }
+    await update_pocket_chatterfy_delivery(log_id, result)
+    return result
+
+
 @app.api_route("/api/integrations/pocket/postback", methods=["GET", "POST"])
 async def pocket_postback(request: Request):
     if not db_pool:
@@ -691,7 +783,23 @@ async def pocket_postback(request: Request):
         return {"status": "skipped", "reason": "missing_click_id", "log_id": log_id}
 
     async with db_pool.acquire() as conn:
-        async with conn.cursor() as cur:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(
+                """
+                SELECT user_id, aio_visit_uuid
+                FROM users
+                WHERE user_id = %s
+                LIMIT 1
+                """,
+                (telegram_id,),
+            )
+            user_row = await cur.fetchone()
+            if not user_row:
+                log_id = await insert_pocket_postback_log(
+                    normalized, payload, "skipped", "user_not_found", telegram_id, source_ip
+                )
+                return {"status": "skipped", "reason": "user_not_found", "log_id": log_id}
+
             await cur.execute(
                 """
                 UPDATE users
@@ -722,15 +830,15 @@ async def pocket_postback(request: Request):
                     telegram_id,
                 ),
             )
-            matched = cur.rowcount > 0
-
-    if not matched:
-        log_id = await insert_pocket_postback_log(
-            normalized, payload, "skipped", "user_not_found", telegram_id, source_ip
-        )
-        return {"status": "skipped", "reason": "user_not_found", "log_id": log_id}
 
     log_id = await insert_pocket_postback_log(normalized, payload, "registered", None, telegram_id, source_ip)
+    chatterfy_result = await send_chatterfy_pocket_registration_postback(
+        log_id=log_id,
+        clickid=sub_id2,
+        trader_id=trader_id,
+        trader_aio_id=(user_row or {}).get("aio_visit_uuid") or "",
+        tgid=int(telegram_id),
+    )
     return {
         "status": "registered",
         "log_id": log_id,
@@ -740,6 +848,7 @@ async def pocket_postback(request: Request):
         "cid": cid or None,
         "sub_id1": sub_id1 or None,
         "sub_id2": sub_id2 or None,
+        "chatterfy": chatterfy_result,
     }
 
 
