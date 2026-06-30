@@ -727,14 +727,23 @@ async def send_chatterfy_pocket_registration_postback(
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(request_url)
+        response_body = response.text[:4000]
         result = {
             "url": request_url,
             "status": "sent" if response.status_code < 400 else "failed",
             "response_status": response.status_code,
-            "response_body": response.text[:4000],
+            "response_body": response_body,
         }
         if response.status_code >= 400:
             result["error"] = f"Chatterfy returned HTTP {response.status_code}"
+        else:
+            try:
+                response_json = response.json()
+            except Exception:
+                response_json = None
+            if isinstance(response_json, dict) and str(response_json.get("status") or "").lower() == "error":
+                result["status"] = "failed"
+                result["error"] = str(response_json.get("text") or response_body or "Chatterfy returned error")[:4000]
     except Exception as exc:
         result = {
             "url": request_url,
