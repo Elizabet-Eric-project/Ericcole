@@ -36,6 +36,18 @@ try:
 except ModuleNotFoundError:
     from stream_matching import stream_requested_asset_matches
 try:
+    from backend.strategy_indicators import (
+        align_analysis_indicators_to_strategy,
+        choose_effective_indicator_keys,
+        normalize_indicator_keys,
+    )
+except ModuleNotFoundError:
+    from strategy_indicators import (
+        align_analysis_indicators_to_strategy,
+        choose_effective_indicator_keys,
+        normalize_indicator_keys,
+    )
+try:
     from backend.market_symbol_mapping import (
         get_custom_forex_currency_assets,
         get_custom_forex_index_assets,
@@ -1452,6 +1464,36 @@ async def get_strategy_context(strategy_id: Optional[int]) -> dict:
         print(f"Strategy context fallback: {e}")
         return {}
     return row or {}
+
+
+async def get_strategy_indicator_keys(strategy_id: Optional[int]) -> List[str]:
+    if not db_pool or strategy_id is None:
+        return []
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT i.`key`
+                    FROM preset_indicators pi
+                    JOIN indicators i ON i.id = pi.indicator_id
+                    WHERE pi.preset_id = %s
+                    ORDER BY i.id ASC
+                    """,
+                    (int(strategy_id),),
+                )
+                rows = await cur.fetchall()
+    except Exception as e:
+        print(f"Strategy indicator keys fallback: {e}")
+        return []
+    return normalize_indicator_keys([row[0] for row in rows or []])
+
+
+async def resolve_effective_indicator_keys(strategy_id: Optional[int], client_keys: Any) -> List[str]:
+    if not isinstance(client_keys, list):
+        client_keys = []
+    strategy_keys = await get_strategy_indicator_keys(strategy_id)
+    return choose_effective_indicator_keys(client_keys, strategy_keys)
 
 
 def normalize_allowed_timeframes(raw_value) -> str:
@@ -4306,9 +4348,9 @@ async def get_strategies(user=Depends(get_telegram_user)):
                            FROM user_analyses ua
                            WHERE ua.strategy_id = p.id AND ua.status IN ('success', 'fail')
                        ) AS closed_signals,
-                       GROUP_CONCAT(i.name SEPARATOR ', ') as indicators_list,
-                       GROUP_CONCAT(i.id SEPARATOR ',') as indicator_ids,
-                       GROUP_CONCAT(i.key SEPARATOR ',') as indicator_keys
+                       GROUP_CONCAT(i.name ORDER BY i.id SEPARATOR ', ') as indicators_list,
+                       GROUP_CONCAT(i.id ORDER BY i.id SEPARATOR ',') as indicator_ids,
+                       GROUP_CONCAT(i.key ORDER BY i.id SEPARATOR ',') as indicator_keys
                 FROM presets p
                 LEFT JOIN preset_indicators pi ON p.id = pi.preset_id
                 LEFT JOIN indicators i ON pi.indicator_id = i.id
@@ -4860,9 +4902,7 @@ async def create_binary_analysis(request: Request, user=Depends(get_telegram_use
         strategy_id_int = None
     if strategy_id_int is None:
         strategy_id_int = await get_user_strategy_id(user_id)
-    allowed_indicators = data.get("allowed_indicators", [])
-    if not isinstance(allowed_indicators, list):
-        allowed_indicators = []
+    allowed_indicators = await resolve_effective_indicator_keys(strategy_id_int, data.get("allowed_indicators", []))
     if not pair:
         raise HTTPException(status_code=400, detail="Pair is required")
 
@@ -5017,7 +5057,7 @@ async def create_binary_analysis(request: Request, user=Depends(get_telegram_use
             return {"error": str(e)}
 
     analysis_data = ensure_analysis_key_levels(analysis_data, preferred_signal=analysis_data.get("recommendation"))
-    analysis_data = ensure_analysis_key_levels(analysis_data, preferred_signal=analysis_data.get("recommendation"))
+    analysis_data = align_analysis_indicators_to_strategy(analysis_data, allowed_indicators)
     analysis_data = enforce_binary_signal(analysis_data)
     recommendation = str(analysis_data.get("recommendation") or analysis_data.get("signal") or "").strip().upper()
     if recommendation not in ("BUY", "SELL"):
@@ -5136,7 +5176,7 @@ async def create_forex_analysis(request: Request, user=Depends(get_telegram_user
         strategy_id_int = None
     if strategy_id_int is None:
         strategy_id_int = await get_user_strategy_id(user_id)
-    allowed_indicators = data.get("allowed_indicators", [])
+    allowed_indicators = await resolve_effective_indicator_keys(strategy_id_int, data.get("allowed_indicators", []))
     exchange = data.get("exchange")
 
     interval_map = {
@@ -5194,6 +5234,7 @@ async def create_forex_analysis(request: Request, user=Depends(get_telegram_user
         )
         analysis_pair = str(pair).strip() or pair
         analysis_data["symbol"] = analysis_pair
+        analysis_data = align_analysis_indicators_to_strategy(analysis_data, allowed_indicators)
         news_data = await fetch_news_data()
     else:
         async with httpx.AsyncClient() as client:
@@ -5255,6 +5296,7 @@ async def create_forex_analysis(request: Request, user=Depends(get_telegram_user
                 else:
                     analysis_data = fallback_to_baseline_analysis(baseline_analysis_data)
                 analysis_data = ensure_analysis_key_levels(analysis_data, preferred_signal=analysis_data.get("recommendation"))
+                analysis_data = align_analysis_indicators_to_strategy(analysis_data, allowed_indicators)
                 analysis_pair = str(pair).strip() or pair
                 analysis_data["symbol"] = analysis_pair
                 news_data = await fetch_news_data()

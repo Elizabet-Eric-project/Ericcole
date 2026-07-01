@@ -1,0 +1,60 @@
+import unittest
+
+from strategy_indicators import (
+    align_analysis_indicators_to_strategy,
+    choose_effective_indicator_keys,
+    normalize_indicator_keys,
+)
+
+
+class StrategyIndicatorsTest(unittest.TestCase):
+    def test_normalizes_indicator_keys_without_losing_strategy_filters(self):
+        self.assertEqual(
+            normalize_indicator_keys(["bb", "EMA 9", "PIVOT_POINTS_HL", "fibonacci", "DMI", "bb"]),
+            ["BB", "EMA 9", "PIVOT_POINTS_HL", "FIBONACCI", "DMI"],
+        )
+
+    def test_database_strategy_keys_win_over_stale_client_keys(self):
+        db_keys = ["bb", "ema9", "atr", "ema50", "ema200", "adx", "fibonacci", "DMI", "SUPERTREND", "ICHIMOKU"]
+        stale_client_keys = ["RSI", "MACD", "ATR", "EMA50", "EMA200", "FIBONACCI"]
+
+        self.assertEqual(
+            choose_effective_indicator_keys(stale_client_keys, db_keys),
+            ["BB", "EMA9", "ATR", "EMA50", "EMA200", "ADX", "FIBONACCI", "DMI", "SUPERTREND", "ICHIMOKU"],
+        )
+
+    def test_client_keys_are_used_only_when_database_has_no_strategy_keys(self):
+        self.assertEqual(
+            choose_effective_indicator_keys(["rsi", "macd"], []),
+            ["RSI", "MACD"],
+        )
+
+    def test_analysis_indicators_are_aligned_to_configured_strategy_keys(self):
+        analysis = {
+            "indicators": {
+                "ATR": {"value": "0.007", "signal": "NEUTRAL"},
+                "RSI": {"value": "38.095", "signal": "NEUTRAL"},
+                "MACD": {"value": "-0.000628", "signal": "SELL"},
+                "EMA50": {"value": "79.026", "signal": "SELL"},
+                "EMA200": {"value": "79.030", "signal": "SELL"},
+                "Fibonacci": {"value": "79.046", "signal": "BUY"},
+            },
+            "votes": {"BUY": 1, "SELL": 3, "NEUTRAL": 2},
+        }
+        allowed = ["bb", "ema9", "atr", "ema50", "ema200", "adx", "fibonacci", "DMI", "SUPERTREND", "ICHIMOKU"]
+
+        result = align_analysis_indicators_to_strategy(analysis, allowed)
+
+        self.assertEqual(
+            list(result["indicators"].keys()),
+            ["BB", "EMA9", "ATR", "EMA50", "EMA200", "ADX", "FIBONACCI", "DMI", "SUPERTREND", "ICHIMOKU"],
+        )
+        self.assertNotIn("RSI", result["indicators"])
+        self.assertNotIn("MACD", result["indicators"])
+        self.assertEqual(result["indicators"]["BB"]["value"], "Configured")
+        self.assertEqual(result["indicators"]["ATR"]["value"], "0.007")
+        self.assertEqual(result["votes"], {"BUY": 1, "SELL": 2, "NEUTRAL": 7})
+
+
+if __name__ == "__main__":
+    unittest.main()

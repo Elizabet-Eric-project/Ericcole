@@ -228,12 +228,7 @@ export default function DemoAnalysisSettings({
     const data = analysisData.raw_data;
     const normalizedIndicators = {};
     Object.entries(data.indicators || {}).forEach(([key, ind]) => {
-      if (key === 'EMA9_21' && ind.value && typeof ind.value === 'object') {
-        normalizedIndicators['EMA9'] = { value: ind.value.e9, signal: ind.signal };
-        normalizedIndicators['EMA21'] = { value: ind.value.e21, signal: ind.signal };
-      } else {
-        normalizedIndicators[key] = ind;
-      }
+      normalizedIndicators[key] = ind;
     });
 
     const filteredInds = Object.entries(normalizedIndicators);
