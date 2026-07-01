@@ -29,7 +29,7 @@ class StrategyIndicatorsTest(unittest.TestCase):
             ["RSI", "MACD"],
         )
 
-    def test_analysis_indicators_are_aligned_to_configured_strategy_keys(self):
+    def test_analysis_indicators_are_aligned_to_existing_configured_strategy_keys(self):
         analysis = {
             "indicators": {
                 "ATR": {"value": "0.007", "signal": "NEUTRAL"},
@@ -47,13 +47,26 @@ class StrategyIndicatorsTest(unittest.TestCase):
 
         self.assertEqual(
             list(result["indicators"].keys()),
-            ["BB", "EMA9", "ATR", "EMA50", "EMA200", "ADX", "FIBONACCI", "DMI", "SUPERTREND", "ICHIMOKU"],
+            ["ATR", "EMA50", "EMA200", "FIBONACCI"],
         )
         self.assertNotIn("RSI", result["indicators"])
         self.assertNotIn("MACD", result["indicators"])
-        self.assertEqual(result["indicators"]["BB"]["value"], "Configured")
         self.assertEqual(result["indicators"]["ATR"]["value"], "0.007")
-        self.assertEqual(result["votes"], {"BUY": 1, "SELL": 2, "NEUTRAL": 7})
+        self.assertEqual(result["votes"], {"BUY": 1, "SELL": 2, "NEUTRAL": 1})
+
+    def test_alignment_keeps_generated_stream_values_for_all_configured_keys(self):
+        analysis = {
+            "indicators": {
+                "BB": {"value": "Mid band", "signal": "SELL"},
+                "EMA9": {"value": 19.05874, "signal": "SELL"},
+                "ATR": {"value": 0.001, "signal": "NEUTRAL"},
+            }
+        }
+
+        result = align_analysis_indicators_to_strategy(analysis, ["bb", "ema9", "atr"])
+
+        self.assertEqual(list(result["indicators"].keys()), ["BB", "EMA9", "ATR"])
+        self.assertEqual(result["indicators"]["BB"]["value"], "Mid band")
 
 
 if __name__ == "__main__":

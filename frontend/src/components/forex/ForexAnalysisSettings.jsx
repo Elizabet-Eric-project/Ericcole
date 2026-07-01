@@ -77,6 +77,21 @@ export default function ForexAnalysisSettings({
     return safeRender(price);
   };
 
+  const formatIndicatorValue = (value) => {
+    if (value === null || value === undefined || value === '') return '---';
+    if (typeof value === 'object') {
+      const primitive = Object.values(value).find(item => typeof item !== 'object');
+      return formatIndicatorValue(primitive);
+    }
+    const parsed = Number(String(value).replace(',', '.').trim());
+    if (Number.isFinite(parsed)) {
+      if (Math.abs(parsed) >= 100) return parsed.toFixed(2);
+      if (Math.abs(parsed) >= 1) return parsed.toFixed(3);
+      return parsed.toFixed(6);
+    }
+    return String(value);
+  };
+
   const formatLevelValue = (value) => {
     if (typeof value === 'number') return value.toFixed(3);
     if (typeof value === 'string') {
@@ -395,7 +410,7 @@ export default function ForexAnalysisSettings({
             {filteredInds.map(([key, ind]) => (
               <div key={key} className="ind-item">
                 <span className="ind-name">{safeRender(key)}</span>
-                <span className="ind-val">{typeof ind.value === 'number' ? ind.value.toFixed(3) : safeRender(ind.value)}</span>
+                <span className="ind-val">{formatIndicatorValue(ind.value)}</span>
                 <span className={`ind-sig ${ind.signal === 'BUY' ? 'sig-buy' : ind.signal === 'SELL' ? 'sig-sell' : 'sig-neutral'}`}>{safeRender(ind.signal)}</span>
               </div>
             ))}

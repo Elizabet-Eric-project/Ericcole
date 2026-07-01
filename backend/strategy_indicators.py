@@ -80,10 +80,6 @@ def _clone_indicator(indicator: Any) -> Dict[str, Any]:
     return {"value": indicator, "signal": "NEUTRAL"}
 
 
-def _placeholder_indicator() -> Dict[str, Any]:
-    return {"value": "Configured", "signal": "NEUTRAL", "weight": 0}
-
-
 def _recalculate_votes(indicators: Dict[str, Any]) -> Dict[str, int]:
     votes = {"BUY": 0, "SELL": 0, "NEUTRAL": 0}
     for item in indicators.values():
@@ -136,7 +132,8 @@ def align_analysis_indicators_to_strategy(analysis_data: Dict[str, Any], allowed
             if alias in source_by_alias:
                 matched_value = source_by_alias[alias]
                 break
-        aligned[display_key] = _clone_indicator(matched_value) if matched_value is not None else _placeholder_indicator()
+        if matched_value is not None:
+            aligned[display_key] = _clone_indicator(matched_value)
 
     analysis_data["indicators"] = aligned
     analysis_data["votes"] = _recalculate_votes(aligned)

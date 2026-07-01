@@ -210,6 +210,12 @@ export default function DemoAnalysisSettings({
     if (val === null || val === undefined) return '...';
     let num = (typeof val === 'object') ? (val.macd ?? val.k ?? val.e9 ?? val.lb ?? Object.values(val).find(v => typeof v === 'number')) : val;
     if (typeof num === 'number') return num.toFixed(3);
+    const parsed = Number(String(num).replace(',', '.').trim());
+    if (Number.isFinite(parsed)) {
+      if (Math.abs(parsed) >= 100) return parsed.toFixed(2);
+      if (Math.abs(parsed) >= 1) return parsed.toFixed(3);
+      return parsed.toFixed(6);
+    }
     return String(val);
   };
 
