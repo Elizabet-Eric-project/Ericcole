@@ -68,6 +68,69 @@ class StrategyIndicatorsTest(unittest.TestCase):
         self.assertEqual(list(result["indicators"].keys()), ["BB", "EMA9", "ATR"])
         self.assertEqual(result["indicators"]["BB"]["value"], "Mid band")
 
+    def test_alignment_can_fill_missing_configured_indicators_without_placeholders(self):
+        analysis = {
+            "price": 19.05874,
+            "recommendation": "SELL",
+            "indicators": {
+                "ATR": {"value": 0.001, "signal": "NEUTRAL"},
+            },
+        }
+        allowed = ["BB", "ATR", "ADX", "DMI", "SUPERTREND", "ICHIMOKU", "PIVOT_POINTS_HL"]
+
+        result = align_analysis_indicators_to_strategy(analysis, allowed, fill_missing=True)
+
+        self.assertEqual(list(result["indicators"].keys()), allowed)
+        self.assertEqual(result["indicators"]["ATR"]["value"], 0.001)
+        self.assertEqual(result["indicators"]["DMI"]["signal"], "SELL")
+        self.assertEqual(result["indicators"]["ADX"]["value"], 24.0)
+        self.assertNotEqual(result["indicators"]["BB"]["value"], "Configured")
+        self.assertNotEqual(result["indicators"]["ICHIMOKU"]["value"], "Configured")
+
+    def test_fill_missing_keeps_each_strategy_indicator_count_exact(self):
+        strategies = {
+            "minimal": ["RSI", "MACD", "ATR", "EMA50"],
+            "trend": ["ADX", "DMI", "SUPERTREND", "ICHIMOKU", "EMA9", "EMA50", "EMA200", "PSAR", "BB"],
+            "full": [
+                "RSI",
+                "MACD",
+                "STOCH",
+                "BB",
+                "EMA9",
+                "ATR",
+                "EMA50",
+                "EMA200",
+                "ADX",
+                "CCI",
+                "PSAR",
+                "FIBONACCI",
+                "PIVOT_POINTS_HL",
+                "DMI",
+                "SUPERTREND",
+                "ICHIMOKU",
+                "EMA9_21",
+            ],
+        }
+
+        for name, allowed in strategies.items():
+            with self.subTest(strategy=name):
+                analysis = {
+                    "price": 79.015,
+                    "recommendation": "SELL",
+                    "indicators": {
+                        "ATR": {"value": 0.007, "signal": "NEUTRAL"},
+                        "RSI": {"value": 38.095, "signal": "NEUTRAL"},
+                    },
+                }
+
+                result = align_analysis_indicators_to_strategy(analysis, allowed, fill_missing=True)
+
+                self.assertEqual(len(result["indicators"]), len(allowed))
+                self.assertEqual(list(result["indicators"].keys()), allowed)
+                self.assertFalse(
+                    any(str(indicator.get("value")) == "Configured" for indicator in result["indicators"].values())
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

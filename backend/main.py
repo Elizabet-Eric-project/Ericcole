@@ -5057,7 +5057,7 @@ async def create_binary_analysis(request: Request, user=Depends(get_telegram_use
             return {"error": str(e)}
 
     analysis_data = ensure_analysis_key_levels(analysis_data, preferred_signal=analysis_data.get("recommendation"))
-    analysis_data = align_analysis_indicators_to_strategy(analysis_data, allowed_indicators)
+    analysis_data = align_analysis_indicators_to_strategy(analysis_data, allowed_indicators, fill_missing=True)
     analysis_data = enforce_binary_signal(analysis_data)
     recommendation = str(analysis_data.get("recommendation") or analysis_data.get("signal") or "").strip().upper()
     if recommendation not in ("BUY", "SELL"):
@@ -5234,7 +5234,7 @@ async def create_forex_analysis(request: Request, user=Depends(get_telegram_user
         )
         analysis_pair = str(pair).strip() or pair
         analysis_data["symbol"] = analysis_pair
-        analysis_data = align_analysis_indicators_to_strategy(analysis_data, allowed_indicators)
+        analysis_data = align_analysis_indicators_to_strategy(analysis_data, allowed_indicators, fill_missing=True)
         news_data = await fetch_news_data()
     else:
         async with httpx.AsyncClient() as client:
@@ -5296,7 +5296,7 @@ async def create_forex_analysis(request: Request, user=Depends(get_telegram_user
                 else:
                     analysis_data = fallback_to_baseline_analysis(baseline_analysis_data)
                 analysis_data = ensure_analysis_key_levels(analysis_data, preferred_signal=analysis_data.get("recommendation"))
-                analysis_data = align_analysis_indicators_to_strategy(analysis_data, allowed_indicators)
+                analysis_data = align_analysis_indicators_to_strategy(analysis_data, allowed_indicators, fill_missing=True)
                 analysis_pair = str(pair).strip() or pair
                 analysis_data["symbol"] = analysis_pair
                 news_data = await fetch_news_data()
